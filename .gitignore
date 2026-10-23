@@ -1,0 +1,26 @@
+# 构建产物 / Build artifacts
+build/
+out/
+*.o
+*.d
+*.elf
+*.bin
+*.iso
+*.map
+
+# 编辑器 / Editors
+.vscode/
+.idea/
+*.swp
+*~
+.cache/
+compile_commands.json
+
+# 系统 / OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 临时文件 / Temp files
+*.log
+*.tmp
