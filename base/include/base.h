@@ -1,0 +1,119 @@
+/*
+ * base.h — liteOS 基座接口（硬件无关）
+ *
+ * 基座是一个无状态的运动控制函数：
+ *
+ *     基座 = f(自描述的运动控制事件) → 对物件施加运动
+ *
+ * 三条不变量（任何实现都不得违反）：
+ *
+ *   1. 无状态 —— 基座不保存任何世界信息。
+ *   2. 接线 ≠ 信息 —— 基座可持有接线（谁挂在哪个口），绝不持有内容。
+ *   3. 唯一原语 —— 只有「施加运动」；「静止」即 motion 取零。
+ *
+ * 任何在本文件之外出现的「停止」「查询状态」「记录历史」接口，
+ * 都是设计违规。
+ */
+#ifndef LITEOS_BASE_H
+#define LITEOS_BASE_H
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+/*
+ * 定点数约定
+ * -----------------
+ * 基座不碰浮点。所有运动量以定点表示：
+ *   高 32 位为整数部分，低 32 位为小数部分（Q32.32）。
+ * 单位由接线在接入时声明（度、毫米、弧度…），基座只搬运数值。
+ */
+typedef int64_t motion_fixed_t;
+
+#define MOTION_DOF_MAX 6
+
+/* 接线句柄。0 为无效。 */
+typedef uint64_t wire_t;
+#define WIRE_NONE 0
+
+/* 世界坐标系：所有运动最终的参照。 */
+#define FRAME_WORLD 0
+
+/* ------------------------------------------------------------------ */
+/* 运动控制事件                                                        */
+/*                                                                    */
+/* 这是基座唯一认识的数据。它必须自描述：                             */
+/*   - 目标是谁      (wire)                                           */
+/*   - 相对谁        (frame)                                          */
+/*   - 运动多久      (duration_ns)                                    */
+/*   - 怎么动        (motion[])                                       */
+/*                                                                    */
+/* 刻意不含任何 opaque 载荷。其它信息走物件与大脑的直连通道。          */
+/* ------------------------------------------------------------------ */
+
+typedef struct {
+        wire_t          wire;          /* 目标接线；WIRE_NONE 无效 */
+        wire_t          frame;         /* 参照系接线；FRAME_WORLD 表示世界系 */
+        uint64_t        duration_ns;   /* 事件有效期（拾取器模型） */
+        uint8_t         dof;           /* 有效分量数，≤ MOTION_DOF_MAX */
+        motion_fixed_t  motion[MOTION_DOF_MAX]; /* 相对 frame 的运动 */
+} motion_event_t;
+
+/*
+ * 「静止」不是一种指令，而是一个事件：
+ *
+ *     motion_event_t still = {
+ *         .wire        = w,
+ *         .frame       = FRAME_WORLD,
+ *         .duration_ns = <有效期>,
+ *         .dof         = 0,
+ *         .motion      = { 0 },
+ *     };
+ *
+ * 即「相对参照系运动为零」。这就是「静止是一种相对的运动」。
+ */
+
+/* ------------------------------------------------------------------ */
+/* 原语                                                                */
+/* ------------------------------------------------------------------ */
+
+typedef enum {
+        MOTION_OK          =  0,
+        MOTION_E_INVAL     = -1,  /* 参数非法（dof 越界、wire 无效…） */
+        MOTION_E_NO_WIRE   = -2,  /* 目标接线不存在或已断开 */
+        MOTION_E_NO_FRAME  = -3,  /* 参照系接线不存在或已断开 */
+        MOTION_E_NO_OBJECT = -4,  /* 接线当前没有物件 */
+        MOTION_E_DEADLINE  = -5,  /* 超过该事件的时间余量 */
+} motion_status_t;
+
+/*
+ * 施加运动 —— 基座唯一的原语。
+ *
+ * 成功返回 MOTION_OK。基座把事件交给目标物件，不在自身保存任何东西。
+ * 事件到期后基座不做任何动作：物件继续按该事件运动。
+ */
+motion_status_t base_apply(const motion_event_t *ev);
+
+/* ------------------------------------------------------------------ */
+/* 接线                                                                */
+/*                                                                    */
+/* 接线是「谁挂在哪个口」。它不是世界信息，是执行的必要条件。          */
+/* ------------------------------------------------------------------ */
+
+typedef struct {
+        wire_t   id;
+        uint32_t unit;        /* 单位语义：0=无, 1=度, 2=毫米, 3=弧度… */
+        uint64_t period_ns;   /* 物件要求的控制周期（由物件自述） */
+        bool     online;
+} wire_desc_t;
+
+/* 接入一个物件，返回分配给它的接线句柄。失败返回 WIRE_NONE。 */
+wire_t base_attach(const wire_desc_t *desc);
+
+/* 物件离开。此后该接线上的任何运动事件都会以 E_NO_WIRE 拒绝。 */
+void base_detach(wire_t w);
+
+/* 接线当前是否有效（仅查询接线本身，不涉及世界状态）。 */
+bool base_wire_valid(wire_t w);
+
+#endif /* LITEOS_BASE_H */

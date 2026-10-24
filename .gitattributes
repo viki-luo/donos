@@ -1,0 +1,24 @@
+# 统一换行符为 LF / Normalize line endings to LF
+* text=auto eol=lf
+
+# 二进制文件不做转换 / Binary files are not converted
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary
+*.elf binary
+*.bin binary
+
+# C 源码 / C sources
+*.c   text diff=c
+*.h   text diff=c
+*.S   text
+*.asm text
+
+# 构建脚本 / Build scripts
+Makefile text
+*.mk     text
+*.ld     text
+
+# 文档 / Documents
+*.md text

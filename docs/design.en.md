@@ -91,6 +91,41 @@ The converse also holds: **the base can be stateless precisely because "stillnes
 
 > **An event has a lifetime; after that lifetime, the object is still moving.**
 
+### 3.1.2 The shape of a motion event
+
+```c
+/* illustrative */
+#define MOTION_DOF_MAX 6
+
+typedef struct {
+    u64 wire;                    /* target: a wiring handle; 0 is invalid */
+    u64 frame;                   /* frame of reference: another wiring; 0 = world */
+    u64 duration_ns;             /* validity period (pick-and-place) */
+    u8  dof;                     /* number of active components, <= 6 */
+    s64 motion[MOTION_DOF_MAX];  /* motion relative to frame, fixed-point */
+} motion_event_t;
+```
+
+Five fields map to the parameters of the single primitive — no more, no fewer.
+
+**Crucially, `motion` means "motion relative to `frame`".**
+
+So "still" needs no separate command:
+
+| What you want | Event |
+|---|---|
+| Absolutely still | `motion = 0, frame = world` |
+| Move with object X (relatively still) | `motion = 0, frame = X's wiring` |
+| Move at velocity v | `motion = v, frame = world` |
+
+**Stillness = `motion` of zero.** This is where "stillness is relative motion" lands in code.
+
+Three disciplines:
+
+1. **No opaque payload.** An event may not carry any non-motion data — "everything else" must travel the direct object-to-brain channel, never through the base. This is discipline, not omission.
+2. **Fixed-point, not floating-point.** The base touches no floats: no FPU state to save, and the WCET stays statically analyzable.
+3. **The frame is just another wiring.** The base therefore stores no frame definitions: `frame` is merely a wiring handle, validated on the spot.
+
 ### 3.2 The boundary of statelessness: wiring vs information
 
 | | **Wiring** | **Information** |
@@ -211,12 +246,13 @@ Just as IP is the narrow waist of the network: everything passes over it, yet ap
 8. All other information flows **directly** between objects and the brain
 9. Deciding still / moving belongs to the brain, not the base
 10. `duration_ns` uses the **pick-and-place model**: the event's validity period; afterwards the object keeps moving along its trajectory
+11. Motion events are **fixed-point, payload-free, and self-describing**: `{wire, frame, duration_ns, dof, motion[]}`
+12. `motion` is **motion relative to `frame`**; "still" is simply `motion = 0`
 
 ---
 
 ## 9. Open questions
 
-- [ ] The exact shape of a motion event
 - [ ] Scale and update semantics of the wiring table
 - [ ] First runnable target (QEMU prototype / real hardware)
 - [ ] Naming
