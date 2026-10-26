@@ -39,6 +39,11 @@ LDFLAGS   := --target=$(TARGET_TRIPLE) -nostdlib -fuse-ld=lld \
 
 ASFLAGS   := -f elf64 -g -F dwarf
 
+# make BOOT_TRACE=1 打开引导阶段单字母标记（A/B/C/D），用于定位卡在哪一步
+ifdef BOOT_TRACE
+ASFLAGS   += -DBOOT_TRACE
+endif
+
 QEMUFLAGS := -m 256M -serial stdio -display none -no-reboot -no-shutdown
 
 # ---------------------------------------------------------------------
