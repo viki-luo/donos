@@ -193,12 +193,100 @@ static void verify_unified(void)
         arch_puts("        'brain' is a role, not a type in the base\n");
 }
 
+/* ------------------------------------------------------------------ */
+/* 第三部分：R8 —— 物件可自述                                         */
+/*                                                                    */
+/* 需求是「所有物件都要有 3D 定位信息，以及其他运动物件该有的特性」。  */
+/* 答案不是加进基座，而是加进物件，并让物件能自述。                    */
+/* 这一节验证：物件能申报能力、能持有位姿，而基座里没有任何路径能碰到。*/
+/* ------------------------------------------------------------------ */
+
+/* Q32.32：把整数写成定点。用乘法而非左移，负数左移在 C 里是未定义行为 */
+#define Q(x) ((motion_fixed_t)(x) * 4294967296LL)
+
+static void verify_self_description(void)
+{
+        arch_puts("\n--- R8: an object describes and holds its own state ---\n");
+
+        /* 一个三自由度、弧度单位的物件 */
+        wire_t part = object_plug(3, 1000000);
+
+        arch_puts("\n  part = wire ");
+        print_wire(part);
+        arch_puts("\n\n");
+
+        /* 先把结构体填满，避免「可能未初始化」的告警 */
+        object_capability_t cap;
+        cap.dof = 3;
+        cap.mass = Q(3) / 2;                 /* 1.5，Q32.32 */
+        for (u8 i = 0; i < MOTION_DOF_MAX; i++) {
+                cap.limit_min[i] = 0;
+                cap.limit_max[i] = 0;
+                cap.max_rate[i]  = 0;
+        }
+        cap.limit_min[0] = Q(-90);
+        cap.limit_max[0] = Q(90);
+        cap.max_rate[0]  = Q(2);
+
+        object_capability_t got;
+        got.dof = 0;
+        got.mass = 0;
+        for (u8 i = 0; i < MOTION_DOF_MAX; i++) {
+                got.limit_min[i] = 0;
+                got.limit_max[i] = 0;
+                got.max_rate[i]  = 0;
+        }
+
+        check("capability is unavailable before the object describes itself",
+              !object_capability(part, &got));
+
+        object_describe(part, &cap);
+        check("capability becomes readable after describing",
+              object_capability(part, &got) && got.dof == 3);
+        check("limits survive the round trip",
+              got.limit_min[0] == Q(-90) && got.limit_max[0] == Q(90));
+        check("mass survives the round trip", got.mass == Q(3) / 2);
+
+        /* 物件持有自己的位姿：位置 (100, 0, 0)，姿态为单位四元数 */
+        object_state_t st;
+        for (u8 i = 0; i < 3; i++) {
+                st.position[i] = 0;
+                st.linear[i]   = 0;
+                st.angular[i]  = 0;
+        }
+        for (u8 i = 0; i < 4; i++)
+                st.orientation[i] = 0;
+        st.position[0]    = Q(100);
+        st.orientation[0] = Q(1);            /* w = 1，无旋转 */
+
+        object_set_state(part, &st);
+
+        object_state_t back;
+        for (u8 i = 0; i < 3; i++) {
+                back.position[i] = 0;
+                back.linear[i]   = 0;
+                back.angular[i]  = 0;
+        }
+        for (u8 i = 0; i < 4; i++)
+                back.orientation[i] = 0;
+
+        bool got_state = object_state(part, &back);
+        check("pose is readable back",
+              got_state && back.position[0] == Q(100));
+        check("orientation is a unit quaternion (w == 1)",
+              got_state && back.orientation[0] == Q(1));
+
+        arch_puts("  note: none of this is reachable from base.h --\n");
+        arch_puts("        the base's whole surface is arrive/depart/apply/valid\n");
+}
+
 int base_verify(void)
 {
         failures = 0;
 
         verify_primitives();
         verify_unified();
+        verify_self_description();
 
         arch_puts("\n  failures = ");
         arch_putdec((u64)failures);

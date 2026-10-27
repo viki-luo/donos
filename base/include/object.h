@@ -17,6 +17,46 @@
 
 #define OBJECT_MAX 64
 
+/* ------------------------------------------------------------------ */
+/* 位姿、状态、能力                                                    */
+/*                                                                     */
+/* 全部在物件侧，基座一个字段都看不到。                                */
+/*                                                                     */
+/* 为什么这些绝不能进基座（设计文档 §3.7）：                          */
+/*   1. 位姿是相对量 —— 存它就要存「相对谁」，即全局世界模型        */
+/*   2. 位姿每周期都变 —— 存它就要有人持续更新，即调度               */
+/*   3. 位姿是判定静止的依据 —— 基座能判定就篡了大脑的权             */
+/*                                                                     */
+/* 三条任意一条成立，基座就不再是无状态函数。                          */
+/* ------------------------------------------------------------------ */
+
+/*
+ * 位姿 + 速度。全部定点（Q32.32），跨界不出现浮点。
+ *
+ * orientation 是单位四元数 {w, x, y, z}，用四元数而非欧拉角：
+ * 没有万向锁，插值也稳定。
+ */
+typedef struct {
+        motion_fixed_t position[3];      /* x, y, z */
+        motion_fixed_t orientation[4];   /* w, x, y, z（单位四元数） */
+        motion_fixed_t linear[3];        /* 线速度 */
+        motion_fixed_t angular[3];       /* 角速度 */
+} object_state_t;
+
+/*
+ * 能力：物件自述的「我能做什么」，基本不变。
+ *
+ * 这是 R8「可自述」的载体。它属于「能力」而非「状态」：
+ * 能力回答「我能怎样」，状态回答「我现在怎样」。
+ */
+typedef struct {
+        u8             dof;                        /* 有效自由度 */
+        motion_fixed_t limit_min[MOTION_DOF_MAX];  /* 每维下限 */
+        motion_fixed_t limit_max[MOTION_DOF_MAX];  /* 每维上限 */
+        motion_fixed_t max_rate[MOTION_DOF_MAX];   /* 每维最大速率 */
+        motion_fixed_t mass;                       /* 质量；0 表示未申报 */
+} object_capability_t;
+
 /*
  * 物件侧初始化：清空物件表。
  * 理由同 base_init：不信任引导器会清 .bss。
@@ -37,6 +77,20 @@ void object_unplug(wire_t w);
  * 包括事件到期之后继续沿轨道运动。
  */
 motion_status_t object_submit(wire_t w, const motion_event_t *ev);
+
+/* ---- 物件自述与自持（R8）：只对大脑可见，基座无路径 ---- */
+
+/* 物件申报自己的能力。申报前 object_capability 返回 false。 */
+void object_describe(wire_t w, const object_capability_t *cap);
+
+/* 读取物件申报过的能力。未申报或接线无效返回 false。 */
+bool object_capability(wire_t w, object_capability_t *out);
+
+/* 物件更新自己的位姿与速度（由物件自己的控制环调用）。 */
+void object_set_state(wire_t w, const object_state_t *st);
+
+/* 读取物件当前的位姿与速度。接线无效返回 false。 */
+bool object_state(wire_t w, object_state_t *out);
 
 /* ---- 只读查询（自检与调试用）---- */
 

@@ -23,9 +23,22 @@ typedef struct {
         u64            duration_ns;
         u8             dof;
         u32            event_count;
+
+        /* --- R8：物件自述与自持 --- */
+        object_state_t      state;
+        object_capability_t cap;
+        bool                described;
 } object_t;
 
 static object_t objects[OBJECT_MAX];
+
+/* 把一段内存清零，不依赖 libc（freestanding） */
+static void zero(void *p, u64 n)
+{
+        u8 *b = (u8 *)p;
+        for (u64 i = 0; i < n; i++)
+                b[i] = 0;
+}
 
 /*
  * 物件侧初始化：清空物件表。
@@ -42,6 +55,9 @@ void object_init(void)
                 objects[i].event_count = 0;
                 for (u8 k = 0; k < MOTION_DOF_MAX; k++)
                         objects[i].motion[k] = 0;
+                zero(&objects[i].state, sizeof(objects[i].state));
+                zero(&objects[i].cap, sizeof(objects[i].cap));
+                objects[i].described = false;
         }
 }
 
@@ -85,6 +101,9 @@ wire_t object_plug(u32 unit, u64 period_ns)
                 objects[i].event_count = 0;
                 for (u8 k = 0; k < MOTION_DOF_MAX; k++)
                         objects[i].motion[k] = 0;
+                zero(&objects[i].state, sizeof(objects[i].state));
+                zero(&objects[i].cap, sizeof(objects[i].cap));
+                objects[i].described = false;
 
                 return w;
         }
@@ -154,4 +173,74 @@ motion_fixed_t object_motion(wire_t w, u8 i)
         if (o == 0 || i >= MOTION_DOF_MAX)
                 return 0;
         return o->motion[i];
+}
+
+/* ------------------------------------------------------------------ */
+/* R8：物件自述与自持                                                  */
+/*                                                                    */
+/* 全部逐字段拷贝，不做整结构赋值 —— 大结构赋值可能让编译器调用        */
+/* memcpy，而 freestanding 下没有链接 libc。                          */
+/* ------------------------------------------------------------------ */
+
+void object_describe(wire_t w, const object_capability_t *cap)
+{
+        object_t *o = find_by_wire(w);
+        if (o == 0 || cap == 0)
+                return;
+
+        o->cap.dof = cap->dof;
+        o->cap.mass = cap->mass;
+        for (u8 i = 0; i < MOTION_DOF_MAX; i++) {
+                o->cap.limit_min[i] = cap->limit_min[i];
+                o->cap.limit_max[i] = cap->limit_max[i];
+                o->cap.max_rate[i]  = cap->max_rate[i];
+        }
+        o->described = true;
+}
+
+bool object_capability(wire_t w, object_capability_t *out)
+{
+        object_t *o = find_by_wire(w);
+        if (o == 0 || out == 0 || !o->described)
+                return false;
+
+        out->dof = o->cap.dof;
+        out->mass = o->cap.mass;
+        for (u8 i = 0; i < MOTION_DOF_MAX; i++) {
+                out->limit_min[i] = o->cap.limit_min[i];
+                out->limit_max[i] = o->cap.limit_max[i];
+                out->max_rate[i]  = o->cap.max_rate[i];
+        }
+        return true;
+}
+
+void object_set_state(wire_t w, const object_state_t *st)
+{
+        object_t *o = find_by_wire(w);
+        if (o == 0 || st == 0)
+                return;
+
+        for (u8 i = 0; i < 3; i++) {
+                o->state.position[i] = st->position[i];
+                o->state.linear[i]   = st->linear[i];
+                o->state.angular[i]  = st->angular[i];
+        }
+        for (u8 i = 0; i < 4; i++)
+                o->state.orientation[i] = st->orientation[i];
+}
+
+bool object_state(wire_t w, object_state_t *out)
+{
+        object_t *o = find_by_wire(w);
+        if (o == 0 || out == 0)
+                return false;
+
+        for (u8 i = 0; i < 3; i++) {
+                out->position[i] = o->state.position[i];
+                out->linear[i]   = o->state.linear[i];
+                out->angular[i]  = o->state.angular[i];
+        }
+        for (u8 i = 0; i < 4; i++)
+                out->orientation[i] = o->state.orientation[i];
+        return true;
 }

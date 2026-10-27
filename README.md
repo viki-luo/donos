@@ -117,6 +117,8 @@ exception handler, build once with `make FAULT_TEST=1`.*
 | [docs/design.en.md](docs/design.en.md) | Design document (English) / 设计文档（英文） |
 | [docs/boot.md](docs/boot.md) | 引导路径（中文）/ Boot path (Chinese) |
 | [docs/boot.en.md](docs/boot.en.md) | Boot path (English) / 引导路径（英文） |
+| [docs/conformance.md](docs/conformance.md) | 物件符合性标准（中文）/ Object conformance standard (Chinese) |
+| [docs/conformance.en.md](docs/conformance.en.md) | Object conformance standard (English) / 物件符合性标准（英文） |
 | [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | 贡献指南 / Contributing guide |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | 变更记录 / Changelog |
 | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | 行为准则 / Code of conduct |

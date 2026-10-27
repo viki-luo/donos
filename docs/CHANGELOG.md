@@ -59,6 +59,18 @@
   base boundary in one place — only `motion_event_t` is sent to an object, only
   `unit` / `period_ns` are received from it, with no query and no state report;
   and why "zero states" is design rather than omission
+- **物件符合性标准**（`docs/conformance.md`，中英双语）：R1–R8 八条要求及各自的
+  验证状态；能力与状态的区分；3D 位姿为何不进基座
+  / **Object conformance standard** (`docs/conformance.md`, bilingual): requirements
+  R1–R8 with their verification status, the capability/state split, and why 3D
+  pose stays out of the base
+- **R8 可自述**：物件侧新增 `object_state_t`（位置、姿态四元数、线/角速度）与
+  `object_capability_t`（自由度、限位、最大速率、质量），以及
+  `object_describe` / `object_capability` / `object_set_state` / `object_state`；
+  `base/verify.c` 增加 6 项断言。基座接口不变
+  / **R8 self-description**: the object side gains `object_state_t` and
+  `object_capability_t` plus four accessors; `base/verify.c` adds 6 assertions.
+  The base interface is unchanged
 
 ### Changed / 变更
 
