@@ -42,6 +42,17 @@
   Earlier wiring was created by hand-written `object_plug` calls in tests; now
   it comes from scanning hardware. Six devices (IDE, VGA, e1000, ...) verified on QEMU
 
+- **统一模型验证**（`base/verify.c`）：用同一套原语建一个「大脑」和两个
+  「手脚」，验证基座无法区分它们 —— 大脑没有特权槽、换大脑与物件热插拔
+  同机制、同一接线既是大脑又是可被驱动的物件
+  / **Unified-model verification** (`base/verify.c`): a brain and two limbs built
+  with the same primitive, showing the base cannot tell them apart — no
+  privileged slot, brain swap uses the same mechanism as object hot-plug, and
+  the same wire is both a brain and a drivable object
+- `object_motion()`：读取物件某个自由度的运动量，供「大脑直接读现场」使用
+  / `object_motion()`: read one degree of freedom of an object, so a newly
+  attached brain can read the situation directly
+
 ### Changed / 变更
 
 - **确立统一模型：一切皆是运动物件**。大脑不再是一个独立类别，而是「恰好正在
@@ -64,6 +75,18 @@
   / The base is re-established as **stateless**: it stores no world information, only wiring
 
 ### Fixed / 修复
+
+- **接线句柄复用会让死句柄复活**。此前 `wire_t` 就是槽位下标，旧大脑
+  离开后新物件立刻复用同一槽位，于是「已离开的句柄」重新变得有效，
+  旧大脑会对着陌生物件下指令。在热插拔系统里这是事故级缺陷。
+  现句柄编码为 `(世代号 << 16) | 槽位`，世代单调递增，离开的句柄
+  永远只是个死句柄，不会再指向任何东西。
+  / **Wire handle reuse resurrected dead handles.** `wire_t` used to be a slot
+  index, so a departed brain's slot was immediately reused and the "dead"
+  handle became valid again — the old brain would then command a stranger. In
+  a hot-plug system that is an accident-class defect. Handles now encode
+  `(generation << 16) | slot` with a monotonic generation, so a departed
+  handle stays dead forever.
 
 - **引导入口必为 32 位代码**。`XEN_ELFNOTE_PHYS32_ENTRY` 的 `PHYS32`
   即「32 位入口」，QEMU 进入时 CPU 处于 32 位保护模式。此前入口按

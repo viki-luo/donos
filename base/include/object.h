@@ -46,4 +46,13 @@ bool object_is_still(wire_t w);
 /* 该物件累计收到过多少个事件。 */
 u32 object_event_count(wire_t w);
 
+/*
+ * 读取该物件第 i 个自由度上的运动量。
+ * 越界或接线无效时返回 0。
+ *
+ * 这是「物件即记忆」的接口：大脑换上来之后，就是靠它直接读现场，
+ * 不需要经过基座。
+ */
+motion_fixed_t object_motion(wire_t w, u8 i);
+
 #endif /* LITEOS_OBJECT_H */

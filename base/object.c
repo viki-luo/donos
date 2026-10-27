@@ -13,10 +13,6 @@
 #include "base.h"
 #include "object.h"
 
-/* 由架构层提供的输出，用于自检 */
-extern void arch_puts(const char *s);
-extern void arch_putdec(u64 v);
-
 typedef struct {
         bool           in_use;
         wire_t         wire;
@@ -150,4 +146,12 @@ u32 object_event_count(wire_t w)
 {
         object_t *o = find_by_wire(w);
         return o == 0 ? 0 : o->event_count;
+}
+
+motion_fixed_t object_motion(wire_t w, u8 i)
+{
+        object_t *o = find_by_wire(w);
+        if (o == 0 || i >= MOTION_DOF_MAX)
+                return 0;
+        return o->motion[i];
 }

@@ -29,6 +29,7 @@
 
 typedef struct {
         wire_desc_t desc;
+        u32         generation;   /* 该槽位被用过的次数，防止旧句柄复活 */
         bool        in_use;
 } wire_slot_t;
 
@@ -45,6 +46,7 @@ void base_init(void)
 {
         for (u64 i = 0; i < WIRE_MAX; i++) {
                 wire_table[i].in_use = false;
+                wire_table[i].generation = 0;
                 wire_table[i].desc.id = WIRE_NONE;
                 wire_table[i].desc.unit = 0;
                 wire_table[i].desc.period_ns = 0;
@@ -64,12 +66,24 @@ extern motion_status_t object_submit(wire_t w, const motion_event_t *ev);
 /* 接线                                                                */
 /* ------------------------------------------------------------------ */
 
+/*
+ * 由句柄找回槽位。
+ *
+ * 必须同时校验「槽位在用」和「世代号一致」：只校验下标的实现，
+ * 会让离开的句柄在槽位被复用时重新变得有效 —— 那是事故源头。
+ */
 static wire_slot_t *slot_of(wire_t w)
 {
-        if (w == WIRE_NONE || w > WIRE_MAX)
+        u32 idx = WIRE_INDEX(w);
+
+        if (idx == 0 || idx > WIRE_MAX)
                 return 0;
-        /* 句柄从 1 开始，便于把 0 当作「无」 */
-        return &wire_table[w - 1];
+
+        wire_slot_t *s = &wire_table[idx - 1];
+        if (!s->in_use || s->generation != WIRE_GEN(w))
+                return 0;
+
+        return s;
 }
 
 wire_t base_arrive(const wire_desc_t *desc)
@@ -79,10 +93,17 @@ wire_t base_arrive(const wire_desc_t *desc)
 
         for (u64 i = 0; i < WIRE_MAX; i++) {
                 if (!wire_table[i].in_use) {
+                        /* 世代号单调递增，0 保留给「无」 */
+                        wire_table[i].generation++;
+                        if (wire_table[i].generation == 0)
+                                wire_table[i].generation = 1;
+
                         wire_table[i].desc = *desc;
                         wire_table[i].in_use = true;
-                        wire_table[i].desc.id = (wire_t)(i + 1);
+                        wire_table[i].desc.id =
+                                WIRE_MAKE(wire_table[i].generation, (u32)(i + 1));
                         wire_table[i].desc.online = true;
+
                         return wire_table[i].desc.id;
                 }
         }

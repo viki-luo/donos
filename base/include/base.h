@@ -30,9 +30,24 @@ typedef int64_t motion_fixed_t;
 
 #define MOTION_DOF_MAX 6
 
-/* 接线句柄。0 为无效。 */
+/*
+ * 接线句柄。0 为无效。
+ *
+ * 编码：(世代号 << 16) | (槽位序号 + 1)
+ *
+ * 为什么带世代号 —— 在一个热插拔系统里，句柄必须跨「槽位复用」保持稳定。
+ * 否则旧大脑缓存着 wire 7，那个物件离开后新物件正好占用 7 号槽，
+ * 旧大脑就会对着一个陌生的物件下指令；在物理世界里这就是事故。
+ *
+ * 有了世代号，离开的句柄永远不会再指向任何东西：它是个死句柄，
+ * 而不是「指向别人的句柄」。
+ */
 typedef uint64_t wire_t;
 #define WIRE_NONE 0
+
+#define WIRE_INDEX(w)       ((u32)((w) & 0xFFFFu))
+#define WIRE_GEN(w)         ((u32)((w) >> 16))
+#define WIRE_MAKE(gen, idx) (((wire_t)(gen) << 16) | (wire_t)(idx))
 
 /* 世界坐标系：所有运动最终的参照。 */
 #define FRAME_WORLD 0

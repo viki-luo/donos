@@ -179,6 +179,7 @@ In the base's eyes there is **no such category as "brain"**. A brain is simply t
 - Replacing a brain = the old brain wire `depart`s and the new one `arrive`s — the **same mechanism** as object hot-plug
 - The base is **symmetric**: no wire is special, and there is no "only the brain may command" check
 - Brains can be stacked on brains arbitrarily; where the stack ends is decided at runtime by the open system, not by the base
+- **"Thinking" and "moving" are the same thing to the base**: both are just a `motion` vector on some wire. The difference is only in how the object itself interprets those components — a brain reads them as cognition, a limb as displacement. The base interprets nothing
 
 > **Everything is a motion object; the base is the only thing that is not one.**
 > The base is not a thing in the world — it is the world's motion-control function.
@@ -261,6 +262,7 @@ Just as IP is the narrow waist of the network: everything passes over it, yet ap
 11. Motion events are **fixed-point, payload-free, and self-describing**: `{wire, frame, duration_ns, dof, motion[]}`
 12. `motion` is **motion relative to `frame`**; "still" is simply `motion = 0`
 13. **Everything is a motion object**; a brain is just an ordinary wire with **no "brain slot"**. The base is symmetric, grants no authority and judges nothing; brains can be stacked arbitrarily. **The base is the only non-object** — not a thing in the world, but the world's motion-control function
+14. **Wire handles stay stable across slot reuse**: encoded as `(generation << 16) | slot` with a monotonic generation. A departed handle never comes back to life — otherwise, after a hot-plug, an old brain would command whatever new object took the same slot
 
 ---
 
@@ -268,6 +270,7 @@ Just as IP is the narrow waist of the network: everything passes over it, yet ap
 
 - [x] First runnable target: x86_64 + QEMU, serial self-test and bus discovery
 - [ ] Scale and update semantics of the wiring table
+- [ ] **Execution model**: the base contains no scheduler. Who advances "thinking" and "moving"? Who decides whose object loop runs right now?
 - [ ] Runtime hot-plug (ACPI PCIe hotplug)
 - [ ] A second processor architecture (aarch64 / riscv64)
 - [ ] Landing the upper brain and brain hot-swap

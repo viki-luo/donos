@@ -118,7 +118,10 @@ u32 pci_discover(void)
                                 put_hex(prog_if, 2);
                         }
                         arch_puts("]  wire ");
-                        arch_putdec(w);
+                        /* 句柄 = (世代 << 16) | 槽位，打印成 槽位/世代 更好读 */
+                        arch_putdec(WIRE_INDEX(w));
+                        arch_puts("/");
+                        arch_putdec(WIRE_GEN(w));
                         arch_puts("\n");
 
                         found++;

@@ -1,0 +1,208 @@
+/*
+ * verify.c — 基座语义与统一模型的验证
+ *
+ * 这里验证的不是「代码有没有 bug」，而是「这套模型能不能成立」。
+ * 第一条尤其重要：如果「大脑也是普通接线」在基座里留了任何特例，
+ * 整个「一切皆是运动物件」就不成立了，而这里会直接失败。
+ */
+#include "base.h"
+#include "object.h"
+#include "report.h"
+#include "verify.h"
+
+static int failures;
+
+static void check(const char *what, bool ok)
+{
+        arch_puts(ok ? "  ok   " : "  FAIL ");
+        arch_puts(what);
+        arch_puts("\n");
+        if (!ok)
+                failures++;
+}
+
+/* 句柄打印成「槽位/世代」，人读得懂，也能看出换大脑时世代在变 */
+static void print_wire(wire_t w)
+{
+        arch_putdec(WIRE_INDEX(w));
+        arch_puts("/");
+        arch_putdec(WIRE_GEN(w));
+}
+
+static motion_event_t make_event(wire_t wire, wire_t frame, u64 dur,
+                                 u8 dof, motion_fixed_t m0, motion_fixed_t m1)
+{
+        motion_event_t ev;
+        ev.wire = wire;
+        ev.frame = frame;
+        ev.duration_ns = dur;
+        ev.dof = dof;
+        for (u8 i = 0; i < MOTION_DOF_MAX; i++)
+                ev.motion[i] = 0;
+        ev.motion[0] = m0;
+        ev.motion[1] = m1;
+        return ev;
+}
+
+/* ------------------------------------------------------------------ */
+/* 第一部分：原语语义                                                  */
+/* ------------------------------------------------------------------ */
+
+static void verify_primitives(void)
+{
+        arch_puts("\n--- primitives ---\n");
+
+        wire_t a = object_plug(2, 1000000);
+        wire_t b = object_plug(2, 1000000);
+
+        arch_puts("  A = wire ");
+        print_wire(a);
+        arch_puts(", B = wire ");
+        print_wire(b);
+        arch_puts("\n\n");
+
+        /* 1. A 相对世界以 100 运动 */
+        motion_event_t ev = make_event(a, FRAME_WORLD, 1000000000ULL, 1, 100, 0);
+        check("A moves relative to the world",
+              base_apply(&ev) == MOTION_OK && object_event_count(a) == 1);
+        check("A is not still", !object_is_still(a));
+
+        /*
+         * 2. B 相对 A 静止 —— 这就是「静止是一种相对的运动」。
+         *    没有单独的「停止」原语：这就是一个 motion 取零的事件。
+         */
+        ev = make_event(b, a, 1000000000ULL, 1, 0, 0);
+        check("B is still relative to A (motion == 0)",
+              base_apply(&ev) == MOTION_OK);
+        check("B reads as still", object_is_still(b));
+
+        /* 3. 参照系必须是一条有效的接线 */
+        ev = make_event(a, 9999, 1000000000ULL, 1, 5, 0);
+        check("unknown frame is rejected", base_apply(&ev) == MOTION_E_NO_FRAME);
+
+        /* 4. 目标接线必须存在 */
+        ev = make_event(9999, FRAME_WORLD, 1000000000ULL, 1, 5, 0);
+        check("unknown wire is rejected", base_apply(&ev) == MOTION_E_NO_WIRE);
+
+        /* 5. dof 越界 */
+        ev = make_event(a, FRAME_WORLD, 1000000000ULL, MOTION_DOF_MAX + 1, 1, 0);
+        check("dof over the limit is rejected", base_apply(&ev) == MOTION_E_INVAL);
+
+        /* 6. 空事件指针 */
+        check("null event is rejected", base_apply(0) == MOTION_E_INVAL);
+
+        /* 7. 拔出后，接线立即失效，事件被拒 */
+        object_unplug(b);
+        check("departed wire is no longer valid", !base_wire_valid(b));
+        ev = make_event(b, FRAME_WORLD, 1000000000ULL, 1, 7, 0);
+        check("event to a departed wire is rejected",
+              base_apply(&ev) == MOTION_E_NO_WIRE);
+
+        /* 8. 拔出 B 之后，以 B 为参照系也必须被拒 */
+        ev = make_event(a, b, 1000000000ULL, 1, 5, 0);
+        check("a departed frame is rejected", base_apply(&ev) == MOTION_E_NO_FRAME);
+
+        object_unplug(a);
+}
+
+/* ------------------------------------------------------------------ */
+/* 第二部分：统一模型 —— 大脑与手脚都是普通接线                         */
+/*                                                                    */
+/* 用户的断言：                                                       */
+/*   所有组件都看作可运动的；大脑不会动、会思考，也是运动；           */
+/*   手脚不会思考、可以动，也是运动。                                 */
+/*                                                                    */
+/* 下面用同一套原语建一个「大脑」和两个「手脚」，看基座能否区分。      */
+/* 结论必须是：区分不了。一旦能区分，模型就塌了。                     */
+/* ------------------------------------------------------------------ */
+
+static void verify_unified(void)
+{
+        arch_puts("\n--- unified model: a brain is an ordinary wire ---\n");
+
+        /* 三条线，三个物件。注意没有任何「种类」参数。 */
+        wire_t brain1 = object_plug(2, 1000000);   /* 会思考 */
+        wire_t hand   = object_plug(2, 1000000);   /* 不会思考，能动手 */
+        wire_t foot   = object_plug(2, 1000000);   /* 不会思考，能走 */
+
+        arch_puts("\n  brain = wire ");
+        print_wire(brain1);
+        arch_puts(", hand = wire ");
+        print_wire(hand);
+        arch_puts(", foot = wire ");
+        print_wire(foot);
+        arch_puts("\n\n");
+
+        /* ---- 断言 1：大脑是一条普通接线 ---- */
+        check("brain attaches through the same base_arrive",
+              brain1 != WIRE_NONE);
+        check("brain occupies no special slot", base_wire_valid(brain1));
+
+        /*
+         * 「会思考」就表现为这条线上的一个自由度，只是它的物理含义
+         * 叫「认知」。基座不认识这个词，它只看到 motion[0]。
+         */
+        motion_event_t ev = make_event(brain1, FRAME_WORLD, 1000000000ULL, 1, 1, 0);
+        check("base_apply drives the brain like any object",
+              base_apply(&ev) == MOTION_OK);
+        check("thinking is motion (brain motion[0] == 1)",
+              object_motion(brain1, 0) == 1);
+
+        /* ---- 断言 2：手脚也是普通接线 ---- */
+        ev = make_event(hand, FRAME_WORLD, 1000000000ULL, 1, 50, 0);
+        check("hand moves (motion[0] == 50)",
+              base_apply(&ev) == MOTION_OK && object_motion(hand, 0) == 50);
+
+        ev = make_event(foot, FRAME_WORLD, 1000000000ULL, 1, 30, 0);
+        check("foot moves (motion[0] == 30)",
+              base_apply(&ev) == MOTION_OK && object_motion(foot, 0) == 30);
+
+        /*
+         * ---- 断言 3：基座在结构上无法区分二者 ----
+         *
+         * 这不是一句断言能「跑」出来的，而是由类型的形状决定的：
+         * wire_desc_t   = { id, unit, period_ns, online }
+         * motion_event_t = { wire, frame, duration_ns, dof, motion[] }
+         * 两者都没有「种类」字段，所以基座没有任何依据去区分。
+         */
+        arch_puts("  note: wire_desc_t and motion_event_t carry no 'kind' field,\n");
+        arch_puts("        so the base is structurally unable to tell them apart\n");
+
+        /* ---- 断言 4：换大脑 = depart + arrive，手脚不受影响 ---- */
+        motion_fixed_t hand_before = object_motion(hand, 0);
+
+        object_unplug(brain1);                     /* 旧大脑离开 */
+        wire_t brain2 = object_plug(2, 1000000);   /* 新大脑到来 */
+
+        check("old brain departed cleanly", !base_wire_valid(brain1));
+        check("new brain arrives as an ordinary wire", base_wire_valid(brain2));
+        check("limbs kept their motion through the brain swap",
+              object_motion(hand, 0) == hand_before);
+
+        arch_puts("  new brain reads the limb directly: hand motion[0] = ");
+        arch_putdec((u64)object_motion(hand, 0));
+        arch_puts("\n  (this is what 'objects are the memory' means)\n");
+
+        /* ---- 断言 5：大脑可以叠大脑，没有特权顶层 ---- */
+        ev = make_event(brain2, FRAME_WORLD, 1000000000ULL, 1, 2, 0);
+        check("a brain can itself be driven by a higher brain",
+              base_apply(&ev) == MOTION_OK && object_motion(brain2, 0) == 2);
+
+        /* 同一条线上，既可以是大脑（下令者），也可以是物件（被驱动者） */
+        arch_puts("  note: the same wire is both a brain and a drivable object;\n");
+        arch_puts("        'brain' is a role, not a type in the base\n");
+}
+
+int base_verify(void)
+{
+        failures = 0;
+
+        verify_primitives();
+        verify_unified();
+
+        arch_puts("\n  failures = ");
+        arch_putdec((u64)failures);
+        arch_puts("\n");
+
+        return failures;
+}
