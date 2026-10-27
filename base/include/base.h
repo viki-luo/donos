@@ -17,16 +17,7 @@
 #ifndef LITEOS_BASE_H
 #define LITEOS_BASE_H
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-
-/* 内核代码用短类型名，减少噪音 */
-typedef uint8_t  u8;
-typedef uint16_t u16;
-typedef uint32_t u32;
-typedef uint64_t u64;
-typedef int64_t  s64;
+#include "types.h"
 
 /*
  * 定点数约定
@@ -114,8 +105,16 @@ typedef struct {
         bool     online;
 } wire_desc_t;
 
-/* 接入一个物件，返回分配给它的接线句柄。失败返回 WIRE_NONE。 */
-wire_t base_attach(const wire_desc_t *desc);
+/*
+ * 物件到达 —— 一条接线由此产生。
+ *
+ * 这是接线**唯一**的来源。总线驱动（如 PCI 枚举）发现一个物件后调用它；
+ * 没有别的路径可以凭空造出一条接线。这样「插上就被识别」才成立：
+ * 识别的结果就是这里返回的句柄。
+ *
+ * 成功返回分配给该物件的接线句柄，失败（表满）返回 WIRE_NONE。
+ */
+wire_t base_arrive(const wire_desc_t *desc);
 
 /*
  * 基座初始化：清空接线表。
@@ -126,7 +125,7 @@ wire_t base_attach(const wire_desc_t *desc);
 void base_init(void);
 
 /* 物件离开。此后该接线上的任何运动事件都会以 E_NO_WIRE 拒绝。 */
-void base_detach(wire_t w);
+void base_depart(wire_t w);
 
 /* 接线当前是否有效（仅查询接线本身，不涉及世界状态）。 */
 bool base_wire_valid(wire_t w);

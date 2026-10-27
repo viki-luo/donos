@@ -77,7 +77,7 @@ wire_t object_plug(u32 unit, u64 period_ns)
                 d.period_ns = period_ns;
                 d.online = true;
 
-                wire_t w = base_attach(&d);
+                wire_t w = base_arrive(&d);
                 if (w == WIRE_NONE)
                         return WIRE_NONE;
 
@@ -101,7 +101,7 @@ void object_unplug(wire_t w)
         if (o == 0)
                 return;
 
-        base_detach(w);
+        base_depart(w);
         o->in_use = false;
         o->wire = WIRE_NONE;
 }

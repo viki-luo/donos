@@ -1,78 +1,19 @@
 /*
  * kmain.c — 内核入口
  *
- * 启动后立刻跑一遍基座自检，验证核心语义。
- * 输出刻意只用 ASCII：一旦出现乱码就能确定是执行问题而不是编码问题。
- */
-#include "base.h"
-#include "object.h"
-
-/* ------------------------------------------------------------------ */
-/* 串口（COM1）—— 已在 boot.asm 中初始化                              */
-/* ------------------------------------------------------------------ */
-
-#define COM1 0x3F8
-
-static inline void outb(u16 port, u8 val)
-{
-        __asm__ volatile("outb %0, %1" : : "a"(val), "Nd"(port));
-}
-
-static inline u8 inb(u16 port)
-{
-        u8 ret;
-        __asm__ volatile("inb %1, %0" : "=a"(ret) : "Nd"(port));
-        return ret;
-}
-
-static void serial_putc(char c)
-{
-        while (!(inb(COM1 + 5) & 0x20))
-                ;
-        outb(COM1, (u8)c);
-}
-
-void arch_puts(const char *s)
-{
-        while (*s) {
-                if (*s == '\n')
-                        serial_putc('\r');
-                serial_putc(*s++);
-        }
-}
-
-/*
- * 十进制输出。
+ * 启动顺序：
+ *   1. 基座与物件侧初始化（清空接线表与物件表）
+ *   2. 平台：IDT → PIC → PIT → 开中断
+ *   3. 总线发现：PCI 扫描，接线由此自动产生
+ *   4. 语义自检：验证「一切皆运动」的几条不变量
  *
- * 刻意用 u32 而不是 u64：64 位除法在 freestanding 下会被编译成
- * __udivdi3 调用，而这里没有链接编译器运行库。
- * 需要打印大数时按 32 位分段。
+ * 第 3 步是关键变化：在这之前，接线是测试代码里手写 object_plug 造出来的；
+ * 现在它来自真实的硬件扫描。
  */
-void arch_putdec(u64 value)
-{
-        u32 v = (u32)value;
-        char buf[12];
-        int n = 0;
-
-        if (v == 0) {
-                serial_putc('0');
-                return;
-        }
-        while (v > 0) {
-                buf[n++] = (char)('0' + (v % 10u));
-                v /= 10u;
-        }
-        while (n > 0)
-                serial_putc(buf[--n]);
-}
-
-static void puthex(u32 v)
-{
-        for (int i = 28; i >= 0; i -= 4) {
-                int nib = (v >> i) & 0xF;
-                serial_putc(nib < 10 ? (char)('0' + nib) : (char)('a' + nib - 10));
-        }
-}
+#include "arch.h"
+#include "base.h"
+#include "bus.h"
+#include "object.h"
 
 /* ------------------------------------------------------------------ */
 /* 自检                                                                */
@@ -106,13 +47,19 @@ static void check(const char *what, bool ok)
 
 static void selftest(void)
 {
-        arch_puts("\n--- base self-test ---\n");
+        arch_puts("\n--- base self-test (synthetic objects) ---\n");
 
+        /*
+         * 这两条接线是自检专用的合成物件，用来验证语义。
+         * 真实物件的接线来自上一步的总线发现。
+         */
         wire_t a = object_plug(2, 1000000);
         wire_t b = object_plug(2, 1000000);
 
-        arch_puts("  A = wire "); arch_putdec(a);
-        arch_puts(", B = wire "); arch_putdec(b);
+        arch_puts("  A = wire ");
+        arch_putdec(a);
+        arch_puts(", B = wire ");
+        arch_putdec(b);
         arch_puts("\n\n");
 
         /* 1. A 相对世界以 100 运动 */
@@ -170,15 +117,52 @@ void kernel_main(u32 magic, u32 info)
         arch_puts("=== liteOS ===\n");
 
         arch_puts("[boot] magic = 0x");
-        puthex(magic);
+        arch_puthex32(magic);
         arch_puts("\n[boot] info  = 0x");
-        puthex(info);
+        arch_puthex32(info);
         arch_puts("\n");
 
+        /* ---- 1. 基座与物件侧 ---- */
         base_init();
         object_init();
 
+        /* ---- 2. 平台 ---- */
+        arch_puts("\n--- platform ---\n");
+        arch_idt_init();
+        arch_puts("  idt   installed (48 vectors)\n");
+        arch_pic_init();
+        arch_puts("  pic   remapped to 0x20/0x28, only IRQ0 open\n");
+        arch_pit_init(100);
+        arch_puts("  pit   100 Hz\n");
+
+        /*
+         * 开中断，并等到第一个节拍到来 —— 这样「定时器真的在跑」
+         * 是被证实的事实，不是一个假设。
+         */
+        arch_irq_enable();
+        u64 t0 = arch_ticks();
+        while (arch_ticks() == t0)
+                __asm__ volatile("hlt");
+        arch_puts("  irq   enabled, timer ticking\n");
+
+        /* ---- 3. 总线发现：接线由此产生 ---- */
+        pci_discover();
+
+        /* ---- 4. 语义自检 ---- */
         selftest();
+
+        /*
+         * 可选的故障注入：make FAULT_TEST=1
+         *
+         * 碰一段恒等映射之外的内存，触发页错误，用来验证异常处理器
+         * 真的会打印现场。没有这一步，「装了 IDT」和「IDT 有用」
+         * 只是两个不同的说法。
+         */
+#ifdef FAULT_TEST
+        arch_puts("\n[fault-test] touching unmapped memory at 0x40000000...\n");
+        *(volatile u64 *)0x40000000ULL = 1;
+        arch_puts("[fault-test] NOT REACHED: handler did not fire\n");
+#endif
 
         arch_puts("\n[idle] halting\n");
 

@@ -72,7 +72,7 @@ static wire_slot_t *slot_of(wire_t w)
         return &wire_table[w - 1];
 }
 
-wire_t base_attach(const wire_desc_t *desc)
+wire_t base_arrive(const wire_desc_t *desc)
 {
         if (desc == 0)
                 return WIRE_NONE;
@@ -91,7 +91,7 @@ wire_t base_attach(const wire_desc_t *desc)
         return WIRE_NONE;
 }
 
-void base_detach(wire_t w)
+void base_depart(wire_t w)
 {
         wire_slot_t *s = slot_of(w);
         if (s == 0 || !s->in_use)

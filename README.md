@@ -76,27 +76,36 @@ make ARCH=x86_64
 make run
 ```
 
-串口会输出基座自检结果 / The serial console prints the base self-test:
+串口会输出平台初始化、总线发现与自检结果（节选）/
+The serial console prints platform init, bus discovery and the self-test (excerpt):
 
 ```
 === liteOS ===
-[boot] magic = 0x00001580
-[boot] info  = 0x00000560
-
+--- platform ---
+  idt   installed (48 vectors)
+  irq   enabled, timer ticking
+--- bus discovery (PCI) ---
+  00.0  8086:1237  [bridge 06/00]  wire 1
+  ...
+  03.0  8086:100e  [network 02/00]  wire 6
+  discovered 6 object(s)
 --- base self-test ---
-  A = wire 1, B = wire 2
-
   ok   A moves relative to the world
   ...
   failures = 0
 ```
+
+关键：管线框里的接线（`wire 1..6`）来自 PCI 扫描，不是测试代码手写的。
+/ The wired objects (`wire 1..6`) above come from a real PCI scan, not from
+test code.
 
 需要 / Requirements: clang + lld, nasm, QEMU。工具链检查见
 `tools/check-toolchain.sh`。引导细节（PVH、32→64 位切换）见
 [docs/boot.md](docs/boot.md)。
 
 *Toolchain check: `tools/check-toolchain.sh`. Boot details (PVH, the
-32→64 transition): [docs/boot.en.md](docs/boot.en.md).*
+32→64 transition): [docs/boot.en.md](docs/boot.en.md). To verify the
+exception handler, build once with `make FAULT_TEST=1`.*
 
 ---
 
@@ -120,8 +129,12 @@ make run
 - [x] 基座无状态边界（接线 vs 信息）/ Statelessness boundary (wiring vs information)
 - [x] 运动控制事件的确切形状 / Exact shape of motion events
 - [x] 首个可运行目标（x86_64 + QEMU，串口自检）/ First runnable target (x86_64 + QEMU, serial self-test)
+- [x] 中断与异常处理（IDT/PIC/PIT）/ Interrupts and exception handling
+- [x] 总线发现：接线来自真实的 PCI 扫描 / Bus discovery: wiring from a real PCI scan
+- [ ] 运行时热插拔（ACPI PCIe hotplug）/ Runtime hot-plug (ACPI PCIe hotplug)
 - [ ] 接线表规模与更新语义 / Wiring table scale and update semantics
 - [ ] 第二个处理器架构 / A second processor architecture
+- [ ] 上层大脑（大脑热拔插）/ The upper brain (brain hot-swap)
 
 ---
 

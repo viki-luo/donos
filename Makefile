@@ -44,6 +44,12 @@ ifdef BOOT_TRACE
 ASFLAGS   += -DBOOT_TRACE
 endif
 
+# make FAULT_TEST=1 在自检之后故意触发一次页错误，验证异常处理器。
+# 这是唯一一件「故意让内核崩」的开关，默认关闭。
+ifdef FAULT_TEST
+CFLAGS    += -DFAULT_TEST
+endif
+
 QEMUFLAGS := -m 256M -serial stdio -display none -no-reboot -no-shutdown
 
 # ---------------------------------------------------------------------

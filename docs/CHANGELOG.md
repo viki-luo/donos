@@ -18,13 +18,42 @@
 - 引导路径文档（中英双语）/ Boot path documentation (bilingual),
   covering the PVH 32-bit entry, the 32→64 transition, and the
   file-backed writable segment requirement
-- 基座实现：`base_init` / `base_apply` / `base_attach` / `base_detach`，
+- 基座实现：`base_init` / `base_apply` / `base_arrive` / `base_depart`，
   以及物件侧的 `object_init` / `object_plug` / `object_unplug` /
   `object_submit` / `object_is_still`
   / Base implementation and the object-side counterpart
 - 启动自检：11 项断言覆盖运动语义、无效接线、无效参照系与越界自由度
   / Boot self-test: 11 assertions covering motion semantics, invalid
   wires, invalid frames, and out-of-range degrees of freedom
+- 公共短类型头 `base/include/types.h`，让架构层不必依赖 `base.h`
+  / A shared typedef header so the architecture layer need not depend on `base.h`
+- 架构层：串口控制台、端口 I/O、IDT、8259 PIC 重映射、PIT 周期中断与开中断
+  / Architecture layer: serial console, port I/O, IDT, 8259 PIC remap, PIT
+  periodic interrupt and enabling interrupts
+- **异常处理**：CPU 异常不再变成三重故障后静默停住，而是打印向量号、
+  错误码与出错指令地址（`make FAULT_TEST=1` 可验证）
+  / **Exception handling**: a CPU exception now prints its vector, error code
+  and faulting instruction address instead of silently triple-faulting
+  (`make FAULT_TEST=1` verifies this)
+- **总线发现**：PCI 扫描找到真实设备，接线由此自动产生。此前接线靠测试
+  代码手写 `object_plug` 造出来；现在来自硬件扫描。发现的 6 个设备
+  （IDE、VGA、e1000 等）在 QEMU 上验证通过
+  / **Bus discovery**: a PCI scan finds real devices and wiring arises from it.
+  Earlier wiring was created by hand-written `object_plug` calls in tests; now
+  it comes from scanning hardware. Six devices (IDE, VGA, e1000, ...) verified on QEMU
+
+### Changed / 变更
+
+- `base_attach` → `base_arrive`，`base_detach` → `base_depart`：
+  接线不再由代码「接入」，而是由总线驱动上报「到达」——明确了接线
+  来自发现事件，是唯一来源
+  / `base_attach` → `base_arrive` and `base_detach` → `base_depart`: wiring is
+  no longer "attached" by code but reported as an arrival by a bus driver —
+  making discovery the single source of wiring
+- 设计模型从「进程/文件」式内核彻底转向「一切皆运动」基座模型
+  / The design model moved completely from a process/file-style kernel to the "everything is motion" base model
+- 基座定位重新确立为**无状态**：不保存世界信息，只持有接线
+  / The base is re-established as **stateless**: it stores no world information, only wiring
 
 ### Fixed / 修复
 
@@ -53,13 +82,6 @@
   used to coincide with the start of the wire table, so `base_init`'s
   return address was zeroed as soon as it was pushed. The stack now
   sits at the very end of the writable segment, after `__bss_end`.
-
-### Changed / 变更
-
-- 设计模型从「进程/文件」式内核彻底转向「一切皆运动」基座模型
-  / The design model moved completely from a process/file-style kernel to the "everything is motion" base model
-- 基座定位重新确立为**无状态**：不保存世界信息，只持有接线
-  / The base is re-established as **stateless**: it stores no world information, only wiring
 
 ### Removed / 移除
 
