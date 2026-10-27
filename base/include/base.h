@@ -21,6 +21,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* 内核代码用短类型名，减少噪音 */
+typedef uint8_t  u8;
+typedef uint16_t u16;
+typedef uint32_t u32;
+typedef uint64_t u64;
+typedef int64_t  s64;
+
 /*
  * 定点数约定
  * -----------------
@@ -109,6 +116,14 @@ typedef struct {
 
 /* 接入一个物件，返回分配给它的接线句柄。失败返回 WIRE_NONE。 */
 wire_t base_attach(const wire_desc_t *desc);
+
+/*
+ * 基座初始化：清空接线表。
+ *
+ * 裸机引导器不一定会把 .bss 清零，而接线表的状态直接决定
+ * 一个口上有没有物件。启动时显式调用一次。
+ */
+void base_init(void);
 
 /* 物件离开。此后该接线上的任何运动事件都会以 E_NO_WIRE 拒绝。 */
 void base_detach(wire_t w);
