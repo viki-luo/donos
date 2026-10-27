@@ -69,15 +69,34 @@ apply_motion(object, motion, frame, duration)
 
 ## 快速开始 / Quick start
 
-> 项目处于**设计阶段**，尚无可用构建。详细设计见 [docs/design.md](docs/design.md)。
-> *The project is in **design stage**; there is no working build yet. See [docs/design.md](docs/design.md).*
-
-计划中的构建方式 / Planned build:
+构建与运行（x86_64，QEMU）/ Build and run (x86_64, QEMU):
 
 ```sh
 make ARCH=x86_64
 make run
 ```
+
+串口会输出基座自检结果 / The serial console prints the base self-test:
+
+```
+=== liteOS ===
+[boot] magic = 0x00001580
+[boot] info  = 0x00000560
+
+--- base self-test ---
+  A = wire 1, B = wire 2
+
+  ok   A moves relative to the world
+  ...
+  failures = 0
+```
+
+需要 / Requirements: clang + lld, nasm, QEMU。工具链检查见
+`tools/check-toolchain.sh`。引导细节（PVH、32→64 位切换）见
+[docs/boot.md](docs/boot.md)。
+
+*Toolchain check: `tools/check-toolchain.sh`. Boot details (PVH, the
+32→64 transition): [docs/boot.en.md](docs/boot.en.md).*
 
 ---
 
@@ -87,6 +106,8 @@ make run
 |---|---|
 | [docs/design.md](docs/design.md) | 设计文档（中文）/ Design document (Chinese) |
 | [docs/design.en.md](docs/design.en.md) | Design document (English) / 设计文档（英文） |
+| [docs/boot.md](docs/boot.md) | 引导路径（中文）/ Boot path (Chinese) |
+| [docs/boot.en.md](docs/boot.en.md) | Boot path (English) / 引导路径（英文） |
 | [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | 贡献指南 / Contributing guide |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | 变更记录 / Changelog |
 | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | 行为准则 / Code of conduct |
@@ -97,9 +118,10 @@ make run
 
 - [x] 本体论与核心原语确立 / Ontology and primitive established
 - [x] 基座无状态边界（接线 vs 信息）/ Statelessness boundary (wiring vs information)
-- [ ] 运动控制事件的确切形状 / Exact shape of motion events
+- [x] 运动控制事件的确切形状 / Exact shape of motion events
+- [x] 首个可运行目标（x86_64 + QEMU，串口自检）/ First runnable target (x86_64 + QEMU, serial self-test)
 - [ ] 接线表规模与更新语义 / Wiring table scale and update semantics
-- [ ] 首个可运行目标 / First runnable target
+- [ ] 第二个处理器架构 / A second processor architecture
 
 ---
 

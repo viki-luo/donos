@@ -15,6 +15,44 @@
 - 完整设计文档（中英双语）/ Full design document (bilingual)
 - 贡献指南与行为准则 / Contributing guide and code of conduct
 - Issue 与 PR 模板 / Issue and PR templates
+- 引导路径文档（中英双语）/ Boot path documentation (bilingual),
+  covering the PVH 32-bit entry, the 32→64 transition, and the
+  file-backed writable segment requirement
+- 基座实现：`base_init` / `base_apply` / `base_attach` / `base_detach`，
+  以及物件侧的 `object_init` / `object_plug` / `object_unplug` /
+  `object_submit` / `object_is_still`
+  / Base implementation and the object-side counterpart
+- 启动自检：11 项断言覆盖运动语义、无效接线、无效参照系与越界自由度
+  / Boot self-test: 11 assertions covering motion semantics, invalid
+  wires, invalid frames, and out-of-range degrees of freedom
+
+### Fixed / 修复
+
+- **引导入口必为 32 位代码**。`XEN_ELFNOTE_PHYS32_ENTRY` 的 `PHYS32`
+  即「32 位入口」，QEMU 进入时 CPU 处于 32 位保护模式。此前入口按
+  64 位编写，`REX` 前缀被当成 `dec`，`lea` 退化为「取位移」，导致
+  `rsp`/`cr3` 指向错误地址、内核在 `base_init` 处静默停住。
+  现改为 32 位 stub 完成 PAE → CR3 → LME → PG → 远跳转的切换。
+  / **The boot entry must be 32-bit code.** `PHYS32` in
+  `XEN_ELFNOTE_PHYS32_ENTRY` means a 32-bit entry point; QEMU enters in
+  32-bit protected mode. The entry was previously written as 64-bit
+  code, so `REX` prefixes were decoded as `dec` and `lea` degenerated
+  into "take the displacement", leaving `rsp`/`cr3` pointing at the
+  wrong addresses and the kernel silently stalling in `base_init`. It
+  is now a 32-bit stub doing PAE → CR3 → LME → PG → far jump.
+- **可写段必须文件承载**。纯 `NOBITS` 的 `.bss` 自成一 ELF 段时
+  `FileSiz = 0`，QEMU 的 PVH 加载器不会映射它，写它直接页错误。
+  现把 `.bss` 与栈并入文件承载的 `.data` 段。
+  / **The writable segment must be file-backed.** A purely `NOBITS`
+  `.bss` forming its own ELF segment has `FileSiz = 0`; QEMU's PVH
+  loader never maps it, so writing to it faults. `.bss` and the stack
+  are now folded into the file-backed `.data` segment.
+- **栈不得与数据同址**。此前栈顶与接线表起点重合，`base_init` 的返回
+  地址入栈即被清零。现栈排在可写段最末尾、`__bss_end` 之后。
+  / **The stack must not share memory with data.** The top of the stack
+  used to coincide with the start of the wire table, so `base_init`'s
+  return address was zeroed as soon as it was pushed. The stack now
+  sits at the very end of the writable segment, after `__bss_end`.
 
 ### Changed / 变更
 
