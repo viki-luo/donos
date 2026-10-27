@@ -52,6 +52,13 @@
 - `object_motion()`：读取物件某个自由度的运动量，供「大脑直接读现场」使用
   / `object_motion()`: read one degree of freedom of an object, so a newly
   attached brain can read the situation directly
+- **双向接口契约**（设计文档 §3.6–3.8）：集中写清跨越基座边界的全部数据 ——
+  发给物件的只有 `motion_event_t`，从物件只收 `unit` / `period_ns`，
+  没有查询、没有状态上报；并说明「零个状态」为何是设计而非缺失
+  / **Bidirectional interface contract** (design §3.6–3.8): all data crossing the
+  base boundary in one place — only `motion_event_t` is sent to an object, only
+  `unit` / `period_ns` are received from it, with no query and no state report;
+  and why "zero states" is design rather than omission
 
 ### Changed / 变更
 

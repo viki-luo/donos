@@ -126,6 +126,8 @@ Three disciplines:
 2. **Fixed-point, not floating-point.** The base touches no floats: no FPU state to save, and the WCET stays statically analyzable.
 3. **The frame is just another wiring.** The base therefore stores no frame definitions: `frame` is merely a wiring handle, validated on the spot.
 
+> This section covers only the "sent to an object" direction. For the **complete bidirectional contract** (including object → base arrival / departure), see §3.6.
+
 ### 3.2 The boundary of statelessness: wiring vs information
 
 | | **Wiring** | **Information** |
@@ -160,6 +162,76 @@ driver models      user management       graphics
 ### 3.5 The base is the sole path for motion control
 
 All motion control must pass through the base. This makes the base the sole executor of the world's motion — **while requiring it to store no world information at all**.
+
+### 3.6 The bidirectional interface contract
+
+All data crossing the base boundary, in one place. **There are only three routes, and no fourth.**
+
+| Direction | Interface | Content | Is it state? |
+|---|---|---|---|
+| object → base | `base_arrive(wire_desc_t)` | `unit`, `period_ns` | no, wiring metadata, once at arrival |
+| object → base | `base_depart(wire_t)` | the handle | no, a departure notice |
+| brain → base | `base_apply(motion_event_t)` | see below | no, a command |
+| base → object | `object_submit(wire, motion_event_t)` | the same struct | no, a command |
+
+**There is no "query" row.** The base never asks an object anything: no `get_state()`, no `poll()`, no heartbeat.
+
+#### Everything sent to an object
+
+```c
+typedef struct {
+        wire_t          wire;          /* target wire */
+        wire_t          frame;         /* reference frame; 0 = world */
+        uint64_t        duration_ns;   /* event validity (pick-and-place model) */
+        uint8_t         dof;           /* active components, <= 6 */
+        motion_fixed_t  motion[6];     /* motion relative to frame, Q32.32 */
+} motion_event_t;
+```
+
+What deliberately **does not exist**:
+
+```
+command codes      MOVING / STILL enums      a mode field
+any distinction between position and velocity (both are motion components)
+payload            priority                  callbacks
+```
+
+#### Everything received from an object
+
+```c
+typedef struct {
+        wire_t   id;          /* filled in by the base */
+        uint32_t unit;        /* unit semantics: 0=none 1=deg 2=mm 3=rad ... */
+        uint64_t period_ns;   /* the control period the object reports for itself */
+        bool     online;      /* set by the base */
+} wire_desc_t;
+```
+
+Only `unit` and `period_ns` genuinely come from the object — properties of the wiring, not "where it is now or whether it is moving".
+
+So an object has exactly **two forms of existence** in the whole system: **alive** (handle valid and generation matching) and **non-existent** (a dead handle). Binary, with no third.
+
+#### Where the object's state lives
+
+In the object itself; the base does not even know it exists:
+
+```
+motion[6]   frame   duration_ns   dof   event_count
+```
+
+### 3.7 Why "zero states"
+
+If the base were to store "this object is now moving or still", it would also have to hold the **frame of reference** in order to compare — and a frame is **information**. The moment the base stores it, statelessness collapses.
+
+> Stillness is relative motion. **Deciding belongs to the brain; applying belongs to the base.**
+
+So "moving / still" is not a value in the base; it is whether `motion[]` is zero relative to `frame` — **computed each time, never stored**.
+
+### 3.8 Where "objects report their state" goes
+
+Objects do report their state, but **not to the base** — **to the brain** (directly, see §7).
+
+The reference implementation is `object_motion(wire, i)`: a newly attached brain reads the situation directly. That is the interface behind "objects are the memory", and it corresponds to decision 8 and the third point of the ontology.
 
 ---
 
