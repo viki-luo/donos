@@ -44,6 +44,14 @@
 
 ### Changed / 变更
 
+- **确立统一模型：一切皆是运动物件**。大脑不再是一个独立类别，而是「恰好正在
+  驱动基座」的普通接线 —— 没有「大脑槽」，换大脑与物件热插拔是同一个机制，
+  基座对称且不授权；**基座是唯一的非物件**（纯函数）
+  / **Unified model established: everything is a motion object.** A brain is no
+  longer a separate category but simply the ordinary wire that happens to be
+  driving the base — there is no "brain slot", replacing a brain is the same
+  mechanism as object hot-plug, and the base is symmetric and grants no
+  authority; **the base is the only non-object** (a pure function)
 - `base_attach` → `base_arrive`，`base_detach` → `base_depart`：
   接线不再由代码「接入」，而是由总线驱动上报「到达」——明确了接线
   来自发现事件，是唯一来源

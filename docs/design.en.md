@@ -143,7 +143,7 @@ Three disciplines:
 ```
 ├── wiring        object-to-port correspondence (transient plumbing)
 ├── apply motion  the single primitive
-├── attach/detach wiring changes
+├── arrival/departure  wiring changes (an arrival event is the only source of wiring)
 ├── execution transients  timers and similar during an event (not world information)
 └── isolation     boundaries between objects, and between brain and objects
 ```
@@ -170,6 +170,18 @@ All motion control must pass through the base. This makes the base the sole exec
 - Responsible for **deciding**: still or moving (because that needs a frame, and a frame is information)
 - Responsible for **intent and policy**: why move, and how
 - Everything else: **direct** to objects
+
+### A brain is just an ordinary wire
+
+In the base's eyes there is **no such category as "brain"**. A brain is simply the wire that happens to be driving the base at the moment:
+
+- A brain attaches with `base_arrive`, exactly like any object — **there is no "brain slot"**
+- Replacing a brain = the old brain wire `depart`s and the new one `arrive`s — the **same mechanism** as object hot-plug
+- The base is **symmetric**: no wire is special, and there is no "only the brain may command" check
+- Brains can be stacked on brains arbitrarily; where the stack ends is decided at runtime by the open system, not by the base
+
+> **Everything is a motion object; the base is the only thing that is not one.**
+> The base is not a thing in the world — it is the world's motion-control function.
 
 ### What makes brain replacement seamless
 
@@ -248,11 +260,15 @@ Just as IP is the narrow waist of the network: everything passes over it, yet ap
 10. `duration_ns` uses the **pick-and-place model**: the event's validity period; afterwards the object keeps moving along its trajectory
 11. Motion events are **fixed-point, payload-free, and self-describing**: `{wire, frame, duration_ns, dof, motion[]}`
 12. `motion` is **motion relative to `frame`**; "still" is simply `motion = 0`
+13. **Everything is a motion object**; a brain is just an ordinary wire with **no "brain slot"**. The base is symmetric, grants no authority and judges nothing; brains can be stacked arbitrarily. **The base is the only non-object** — not a thing in the world, but the world's motion-control function
 
 ---
 
 ## 9. Open questions
 
+- [x] First runnable target: x86_64 + QEMU, serial self-test and bus discovery
 - [ ] Scale and update semantics of the wiring table
-- [ ] First runnable target (QEMU prototype / real hardware)
+- [ ] Runtime hot-plug (ACPI PCIe hotplug)
+- [ ] A second processor architecture (aarch64 / riscv64)
+- [ ] Landing the upper brain and brain hot-swap
 - [ ] Naming
