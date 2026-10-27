@@ -110,6 +110,20 @@ bool object_state(wire_t w, object_state_t *out);
  */
 bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX]);
 
+/* ---- 执行模型（设计决定 16）：在基座之外推进各物件的运动环 ---- */
+
+/*
+ * 推进所有到期物件的运动环一步，返回本次推进的物件数。
+ *
+ * now_ns 由调用者（架构层的时钟）给出：基座不持有时间，执行层也不自己
+ * 读硬件。每个物件按自己在到达时申报的 period_ns 被推进；period_ns 为 0
+ * 的物件不会被推进。落后时不补跑，从当前时刻重新排期。
+ */
+u32 object_run(u64 now_ns);
+
+/* 该物件的运动环累计被推进了多少步。 */
+u32 object_step_count(wire_t w);
+
 /* ---- 只读查询（自检与调试用）---- */
 
 /* 该物件当前是否相对其参照系静止（所有有效分量为零）。 */

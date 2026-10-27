@@ -79,6 +79,14 @@
   directly, object to object, never through the base; cycles and broken chains
   are rejected on the object side. `base/verify.c` adds 6 assertions. The
   reference only composes translation and does not yet rotate by orientation
+- **执行模型（设计决定 16）**：新增 `object_run(now_ns)` 与 `object_step_count()`，
+  按各物件到达时申报的 `period_ns` 推进其运动环，把解算出的运动积分进位置；
+  时间由调用者给出，基座不调度、不计时。`base/verify.c` 增加 6 项断言（合成时钟）
+  / **Execution model (decision 16)**: new `object_run(now_ns)` and
+  `object_step_count()` advance each object's motion loop at the `period_ns` it
+  declared on arrival, integrating resolved motion into position; time is
+  supplied by the caller and the base neither schedules nor keeps time.
+  `base/verify.c` adds 6 assertions (synthetic clock)
 
 ### Changed / 变更
 

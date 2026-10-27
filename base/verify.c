@@ -338,6 +338,63 @@ static void verify_frame_resolution(void)
         object_unplug(c);
 }
 
+/* ------------------------------------------------------------------ */
+/* 第五部分：执行模型（设计决定 16）                                    */
+/*                                                                    */
+/* 基座不调度。各物件按自己申报的 period_ns 被执行层推进，时间由调用者  */
+/* 给出。这里用合成时钟，结果完全确定。                                */
+/* ------------------------------------------------------------------ */
+
+#define MS 1000000ULL
+
+static void verify_execution(void)
+{
+        arch_puts("\n--- execution model: each object runs at its own period ---\n\n");
+
+        wire_t fast     = object_plug(2, 1 * MS);   /* 每 1 ms 一步 */
+        wire_t slow     = object_plug(2, 3 * MS);   /* 每 3 ms 一步 */
+        wire_t follower = object_plug(2, 1 * MS);   /* 相对 fast 静止 */
+        wire_t idle     = object_plug(0, 0);        /* 未申报周期 */
+
+        motion_event_t ev = make_event(fast, FRAME_WORLD, 1000000000ULL, 1, 10, 0);
+        base_apply(&ev);
+        ev = make_event(follower, fast, 1000000000ULL, 1, 0, 0);
+        base_apply(&ev);
+
+        for (u64 t = 1; t <= 9; t++)
+                object_run(t * MS);
+
+        check("fast object stepped 9 times in 9 ms",
+              object_step_count(fast) == 9);
+        check("slow object stepped 3 times in 9 ms",
+              object_step_count(slow) == 3);
+        check("an object without a declared period is never stepped",
+              object_step_count(idle) == 0);
+
+        object_state_t st;
+        bool ok = object_state(fast, &st);
+        check("motion is integrated into position (9 x 10 = 90)",
+              ok && st.position[0] == 90);
+
+        /*
+         * 相对 fast 静止的物件，在世界里跟着 fast 一起走 ——
+         * 「静止是一种相对的运动」在时间推进下依然成立。
+         */
+        ok = object_state(follower, &st);
+        check("an object still relative to fast moves with it (90)",
+              ok && st.position[0] == 90);
+
+        /* 落后很久之后只走一步，不会一次补跑几十步 */
+        object_run(100 * MS);
+        check("a late run steps once instead of catching up",
+              object_step_count(fast) == 10);
+
+        object_unplug(fast);
+        object_unplug(slow);
+        object_unplug(follower);
+        object_unplug(idle);
+}
+
 int base_verify(void)
 {
         failures = 0;
@@ -346,6 +403,7 @@ int base_verify(void)
         verify_unified();
         verify_self_description();
         verify_frame_resolution();
+        verify_execution();
 
         arch_puts("\n  failures = ");
         arch_putdec((u64)failures);

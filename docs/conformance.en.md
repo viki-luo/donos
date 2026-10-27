@@ -79,5 +79,5 @@ Here the standard defines the object's self-description format, the base only ca
 ## 5. Open questions
 
 - [x] **Who resolves `frame`**: settled as **option A, the object resolves it** (decision 15). An object walks the frame chain and reads each frame object's motion directly — **objects may connect to each other directly**, never through the base. The base cannot see the chain; cycles and broken chains are detected and rejected on the object side. The reference `object_resolve()` only composes translation and does not yet rotate by the frame's orientation.
-- [ ] **Nobody honours `period_ns`.** The base contains no scheduler, so today the standard can only require the declaration, not guarantee it (see design.en.md §9, execution model).
+- [x] **`period_ns` is honoured by the execution layer** (decision 16): `object_run(now_ns)` advances each object's motion loop at its declared period, and the base still does not schedule. Verified under a synthetic clock; not yet driven by PIT ticks.
 - [ ] **Conformance test suite.** R1–R3 have no automated check yet.

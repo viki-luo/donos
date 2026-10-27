@@ -23,6 +23,9 @@ typedef struct {
         u64            duration_ns;
         u8             dof;
         u32            event_count;
+        u64            period_ns;     /* 物件自述的控制周期，由执行层兑现 */
+        u64            next_due_ns;   /* 下一次运动环到期时刻；0 = 尚未起步 */
+        u32            step_count;
 
         /* --- R8：物件自述与自持 --- */
         object_state_t      state;
@@ -53,6 +56,9 @@ void object_init(void)
                 objects[i].duration_ns = 0;
                 objects[i].dof = 0;
                 objects[i].event_count = 0;
+                objects[i].period_ns = 0;
+                objects[i].next_due_ns = 0;
+                objects[i].step_count = 0;
                 for (u8 k = 0; k < MOTION_DOF_MAX; k++)
                         objects[i].motion[k] = 0;
                 zero(&objects[i].state, sizeof(objects[i].state));
@@ -99,6 +105,9 @@ wire_t object_plug(u32 unit, u64 period_ns)
                 objects[i].duration_ns = 0;
                 objects[i].dof = 0;
                 objects[i].event_count = 0;
+                objects[i].period_ns = period_ns;
+                objects[i].next_due_ns = 0;
+                objects[i].step_count = 0;
                 for (u8 k = 0; k < MOTION_DOF_MAX; k++)
                         objects[i].motion[k] = 0;
                 zero(&objects[i].state, sizeof(objects[i].state));
@@ -272,4 +281,59 @@ bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX])
                 frame = f->frame;
         }
         return true;
+}
+
+/* ------------------------------------------------------------------ */
+/* 执行模型（设计决定 16）：按物件自述的 period_ns 推进运动环           */
+/*                                                                    */
+/* 这一层在基座之外。基座不调度、不计时；时间由调用者（架构层）给出。 */
+/* ------------------------------------------------------------------ */
+
+/*
+ * 物件的一步运动环：把解算出的相对世界运动积分进位置。
+ * 参考实现中 motion 的单位是「每个控制周期的位移」。
+ * 参照链断开或成环时位置保持不动，但这一步仍算执行过。
+ */
+static void object_step(object_t *o)
+{
+        motion_fixed_t r[MOTION_DOF_MAX];
+
+        if (object_resolve(o->wire, r)) {
+                for (u8 i = 0; i < 3 && i < o->dof; i++)
+                        o->state.position[i] += r[i];
+        }
+        o->step_count++;
+}
+
+u32 object_run(u64 now_ns)
+{
+        u32 stepped = 0;
+
+        for (u64 i = 0; i < OBJECT_MAX; i++) {
+                object_t *o = &objects[i];
+
+                if (!o->in_use || o->period_ns == 0)
+                        continue;               /* 未申报周期：不推进 */
+                if (o->next_due_ns != 0 && now_ns < o->next_due_ns)
+                        continue;               /* 还没到期 */
+
+                object_step(o);
+                stepped++;
+
+                if (o->next_due_ns == 0) {
+                        o->next_due_ns = now_ns + o->period_ns;
+                } else {
+                        o->next_due_ns += o->period_ns;
+                        /* 落后太多就不补跑，直接从现在重新排 */
+                        if (o->next_due_ns <= now_ns)
+                                o->next_due_ns = now_ns + o->period_ns;
+                }
+        }
+        return stepped;
+}
+
+u32 object_step_count(wire_t w)
+{
+        object_t *o = find_by_wire(w);
+        return o == 0 ? 0 : o->step_count;
 }
