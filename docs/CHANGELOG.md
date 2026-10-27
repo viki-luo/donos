@@ -87,6 +87,12 @@
   declared on arrival, integrating resolved motion into position; time is
   supplied by the caller and the base neither schedules nor keeps time.
   `base/verify.c` adds 6 assertions (synthetic clock)
+- **执行层接入真实时钟**：PIT 100 Hz 节拍在 `kmain.c` 主循环中驱动 `object_run`，
+  中断处理只累加节拍；启动后物件随真实时间持续运动，内核不再停在 `[idle] halting`
+  / **Execution layer on a real clock**: 100 Hz PIT ticks drive `object_run` from
+  the main loop in `kmain.c`, while the interrupt handler only counts ticks;
+  objects now keep moving in real time and the kernel no longer stops at
+  `[idle] halting`
 
 ### Changed / 变更
 

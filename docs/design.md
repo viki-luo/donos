@@ -346,7 +346,7 @@ motion[6]   frame   duration_ns   dof   event_count
 - [x] 首个可运行目标：x86_64 + QEMU，串口自检与总线发现
 - [ ] 接线表的规模与更新语义
 - [x] **执行模型**：已定为设计决定 16，参考实现 `object_run()`（合成时钟下验证）
-- [ ] 执行层接入真实时钟（PIT 节拍驱动 `object_run`）
+- [x] 执行层接入真实时钟：PIT 100 Hz 节拍在主循环中驱动 `object_run`，中断处理只累加节拍
 - [ ] 运行时热插拔（ACPI PCIe hotplug）
 - [ ] 第二个处理器架构（aarch64 / riscv64）
 - [ ] 上层大脑的落地与大脑热插拔
