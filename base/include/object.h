@@ -92,6 +92,24 @@ void object_set_state(wire_t w, const object_state_t *st);
 /* 读取物件当前的位姿与速度。接线无效返回 false。 */
 bool object_state(wire_t w, object_state_t *out);
 
+/* ---- 参照系由物件自己解（设计决定 15，方案 A）---- */
+
+/* 参照链的最大深度。超过即视为成环。 */
+#define OBJECT_FRAME_DEPTH_MAX 8
+
+/*
+ * 把物件「相对 frame 的运动」解成「相对世界的运动」。
+ *
+ * 沿参照链逐级直读参照系物件的运动 —— 这是物件间直连，不经过基座。
+ * 基座不能做这件事：解 frame 要读另一个物件的运动，那是世界信息。
+ *
+ * 参照系已离开、链断开或成环时返回 false：基座只校验 frame 这条线
+ * 当下是否有效，发现不了环，环只能由物件侧发现。
+ *
+ * 参考实现只做逐分量相加（平移合成），不按参照系姿态旋转。
+ */
+bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX]);
+
 /* ---- 只读查询（自检与调试用）---- */
 
 /* 该物件当前是否相对其参照系静止（所有有效分量为零）。 */

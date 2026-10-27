@@ -335,6 +335,7 @@ Just as IP is the narrow waist of the network: everything passes over it, yet ap
 12. `motion` is **motion relative to `frame`**; "still" is simply `motion = 0`
 13. **Everything is a motion object**; a brain is just an ordinary wire with **no "brain slot"**. The base is symmetric, grants no authority and judges nothing; brains can be stacked arbitrarily. **The base is the only non-object** — not a thing in the world, but the world's motion-control function
 14. **Wire handles stay stable across slot reuse**: encoded as `(generation << 16) | slot` with a monotonic generation. A departed handle never comes back to life — otherwise, after a hot-plug, an old brain would command whatever new object took the same slot
+15. **Objects resolve their own frame (option A)**: an object walks the frame chain and reads each frame object's motion directly — **objects may connect to each other directly**, never through the base. The base only checks that the `frame` wire is valid right now; it cannot see the chain and therefore cannot detect cycles. Cycles and broken chains are detected and rejected on the object side
 
 ---
 

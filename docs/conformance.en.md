@@ -24,7 +24,7 @@ It is not necessarily a bad object; accepting it would require a second primitiv
 | **R2** | Self-sustaining | Keeps moving after an event expires; the base does not keep feeding it | Stop sending after `duration_ns` expires; the object is still moving (pick-and-place model) | reasoning |
 | **R3** | Self-declared wiring properties | Declares `unit` and `period_ns` on arrival | Both `wire_desc_t` fields carry real values | reasoning |
 | **R4** | Fixed-point boundary | No floating point crosses the boundary | `motion[]` accepts only Q32.32; floats are allowed inside, not at the boundary | type-enforced |
-| **R5** | Referenceable | Can serve as another object's `frame`, and can resolve the `frame` it receives | Two objects used as each other's frame both stay consistent | partial (see §5) |
+| **R5** | Referenceable | Can serve as another object's `frame`, and can resolve the `frame` it receives | Resolves motion relative to the world along the frame chain; cycles and broken chains must be rejected | **tested** |
 | **R6** | Self-held state, direct to the brain | State never appears in the base; only the brain can see it | The base has no interface that reads object state | type-enforced |
 | **R7** | At most 6 degrees of freedom | A single wire carries at most 6 dimensions | `dof > 6` is rejected | **tested** |
 | **R8** | Self-describing | Can declare its capability and hold its pose and velocity, via the direct brain channel, never through the base | Readable after declaring; `base.h` has no corresponding interface | **tested** |
@@ -78,8 +78,6 @@ Here the standard defines the object's self-description format, the base only ca
 
 ## 5. Open questions
 
-- [ ] **Who resolves `frame`.** The base cannot (it would have to read the frame object's motion, which is world information).
-  - Option A: the object resolves it → the standard must add a **direct object-to-object** channel
-  - Option B: the brain pre-resolves into the world frame → `frame` is always `FRAME_WORLD` and the field degenerates
+- [x] **Who resolves `frame`**: settled as **option A, the object resolves it** (decision 15). An object walks the frame chain and reads each frame object's motion directly — **objects may connect to each other directly**, never through the base. The base cannot see the chain; cycles and broken chains are detected and rejected on the object side. The reference `object_resolve()` only composes translation and does not yet rotate by the frame's orientation.
 - [ ] **Nobody honours `period_ns`.** The base contains no scheduler, so today the standard can only require the declaration, not guarantee it (see design.en.md §9, execution model).
-- [ ] **Conformance test suite.** R1–R3 and R5 have no automated check yet.
+- [ ] **Conformance test suite.** R1–R3 have no automated check yet.

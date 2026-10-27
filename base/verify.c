@@ -278,6 +278,64 @@ static void verify_self_description(void)
 
         arch_puts("  note: none of this is reachable from base.h --\n");
         arch_puts("        the base's whole surface is arrive/depart/apply/valid\n");
+
+        object_unplug(part);
+}
+
+/* ------------------------------------------------------------------ */
+/* 第四部分：参照系由物件自己解（设计决定 15，方案 A）                  */
+/*                                                                    */
+/* 基座只校验 frame 这条线当下有效，不解它。解 frame 要读参照系物件的  */
+/* 运动 —— 那是世界信息，只能由物件之间直连完成。                      */
+/* ------------------------------------------------------------------ */
+
+static void verify_frame_resolution(void)
+{
+        arch_puts("\n--- R5: objects resolve their own frame (option A) ---\n\n");
+
+        wire_t a = object_plug(2, 1000000);
+        wire_t b = object_plug(2, 1000000);
+        wire_t c = object_plug(2, 1000000);
+        motion_fixed_t r[MOTION_DOF_MAX];
+
+        /* A 相对世界 100；B 相对 A 5；C 相对 B 2 */
+        motion_event_t ev = make_event(a, FRAME_WORLD, 1000000000ULL, 1, 100, 0);
+        base_apply(&ev);
+        ev = make_event(b, a, 1000000000ULL, 1, 5, 0);
+        base_apply(&ev);
+        ev = make_event(c, b, 1000000000ULL, 1, 2, 0);
+        base_apply(&ev);
+
+        check("B resolves to 105 relative to the world",
+              object_resolve(b, r) && r[0] == 105);
+        check("C resolves through a two-level chain to 107",
+              object_resolve(c, r) && r[0] == 107);
+
+        /* 相对静止：B 相对 A 取零，解出来就等于 A 的运动 */
+        ev = make_event(b, a, 1000000000ULL, 1, 0, 0);
+        base_apply(&ev);
+        check("still relative to A resolves to A's own motion (100)",
+              object_resolve(b, r) && r[0] == 100);
+
+        /*
+         * 成环：基座能接受（每次只看 frame 这条线是否有效），
+         * 只有物件侧沿链走才能发现。
+         */
+        ev = make_event(a, c, 1000000000ULL, 1, 1, 0);
+        check("the base accepts a cyclic frame (it cannot see chains)",
+              base_apply(&ev) == MOTION_OK);
+        check("the object side detects the cycle",
+              !object_resolve(c, r));
+
+        /* 参照系离开后，链断开，解算必须失败而不是给出旧值 */
+        ev = make_event(a, FRAME_WORLD, 1000000000ULL, 1, 100, 0);
+        base_apply(&ev);
+        object_unplug(a);
+        check("a departed frame breaks the chain",
+              !object_resolve(b, r));
+
+        object_unplug(b);
+        object_unplug(c);
 }
 
 int base_verify(void)
@@ -287,6 +345,7 @@ int base_verify(void)
         verify_primitives();
         verify_unified();
         verify_self_description();
+        verify_frame_resolution();
 
         arch_puts("\n  failures = ");
         arch_putdec((u64)failures);

@@ -244,3 +244,32 @@ bool object_state(wire_t w, object_state_t *out)
                 out->orientation[i] = o->state.orientation[i];
         return true;
 }
+
+/* ------------------------------------------------------------------ */
+/* 参照系解算（方案 A：物件自己解，物件间直连）                         */
+/* ------------------------------------------------------------------ */
+
+bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX])
+{
+        object_t *o = find_by_wire(w);
+        if (o == 0 || out == 0)
+                return false;
+
+        for (u8 i = 0; i < MOTION_DOF_MAX; i++)
+                out[i] = o->motion[i];
+
+        wire_t frame = o->frame;
+        for (u32 depth = 0; frame != FRAME_WORLD; depth++) {
+                if (depth >= OBJECT_FRAME_DEPTH_MAX)
+                        return false;           /* 成环或链过深 */
+
+                object_t *f = find_by_wire(frame);
+                if (f == 0)
+                        return false;           /* 参照系已离开 */
+
+                for (u8 i = 0; i < MOTION_DOF_MAX; i++)
+                        out[i] += f->motion[i];
+                frame = f->frame;
+        }
+        return true;
+}

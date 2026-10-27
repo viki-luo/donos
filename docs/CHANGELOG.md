@@ -71,6 +71,14 @@
   / **R8 self-description**: the object side gains `object_state_t` and
   `object_capability_t` plus four accessors; `base/verify.c` adds 6 assertions.
   The base interface is unchanged
+- **参照系由物件自己解（设计决定 15，方案 A）**：新增 `object_resolve()`，沿参照链
+  直读参照系物件的运动，物件之间直连、不经过基座；成环与断链由物件侧拒绝。
+  `base/verify.c` 增加 6 项断言。参考实现只做平移合成，尚不按参照系姿态旋转
+  / **Objects resolve their own frame (decision 15, option A)**: new
+  `object_resolve()` walks the frame chain reading each frame object's motion
+  directly, object to object, never through the base; cycles and broken chains
+  are rejected on the object side. `base/verify.c` adds 6 assertions. The
+  reference only composes translation and does not yet rotate by orientation
 
 ### Changed / 变更
 
