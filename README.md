@@ -133,7 +133,8 @@ exception handler, build once with `make FAULT_TEST=1`.*
 - [x] 首个可运行目标（x86_64 + QEMU，串口自检）/ First runnable target (x86_64 + QEMU, serial self-test)
 - [x] 中断与异常处理（IDT/PIC/PIT）/ Interrupts and exception handling
 - [x] 总线发现：接线来自真实的 PCI 扫描 / Bus discovery: wiring from a real PCI scan
-- [ ] 运行时热插拔（ACPI PCIe hotplug）/ Runtime hot-plug (ACPI PCIe hotplug)
+- [x] 运行时热插拔（轮询 PCI 总线，`tools/hotplug-test.sh` 验证）/ Runtime hot-plug (PCI bus polling, verified by `tools/hotplug-test.sh`)
+- [ ] 中断驱动的热插拔（ACPI GPE）/ Interrupt-driven hot-plug (ACPI GPE)
 - [ ] 接线表规模与更新语义 / Wiring table scale and update semantics
 - [ ] 第二个处理器架构 / A second processor architecture
 - [ ] 上层大脑（大脑热拔插）/ The upper brain (brain hot-swap)

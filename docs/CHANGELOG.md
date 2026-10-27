@@ -93,6 +93,15 @@
   the main loop in `kmain.c`, while the interrupt handler only counts ticks;
   objects now keep moving in real time and the kernel no longer stops at
   `[idle] halting`
+- **运行时热插拔**：新增 `pci_poll()`，主循环每 100 ms 重扫 PCI 总线并与上次
+  结果比对，新设备到达（`object_plug`）、消失设备离开（`object_unplug`）；
+  拔出请求通过 QEMU PIIX4 ACPI 热插拔寄存器（0xAE00）完成弹出。
+  新增 `tools/hotplug-test.sh`，运行中插入并拔出 e1000 网卡验证
+  / **Runtime hot-plug**: new `pci_poll()` rescans the PCI bus every 100 ms from
+  the main loop and diffs against the previous scan — new devices arrive, vanished
+  ones depart; removal requests are completed through the QEMU PIIX4 ACPI hotplug
+  registers (0xAE00). New `tools/hotplug-test.sh` adds and removes an e1000 NIC
+  while the kernel runs
 
 ### Changed / 变更
 

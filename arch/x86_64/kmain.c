@@ -114,6 +114,10 @@ void kernel_main(u32 magic, u32 info)
 
                 object_run(now * NS_PER_TICK);
 
+                /* 运行时热插拔：每 100 ms 重扫一次总线 */
+                if (now % (TICK_HZ / 10) == 0)
+                        pci_poll();
+
                 if (!reported && now - start >= TICK_HZ) {
                         object_state_t st;
 

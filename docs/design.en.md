@@ -346,7 +346,8 @@ Just as IP is the narrow waist of the network: everything passes over it, yet ap
 - [ ] Scale and update semantics of the wiring table
 - [x] **Execution model**: settled as decision 16; reference `object_run()` (verified under a synthetic clock)
 - [x] Execution layer driven by a real clock: 100 Hz PIT ticks drive `object_run` from the main loop; the interrupt handler only counts ticks
-- [ ] Runtime hot-plug (ACPI PCIe hotplug)
+- [x] Runtime hot-plug: the main loop rescans the PCI bus every 100 ms; new devices arrive and vanished ones depart; removal is completed through the QEMU PIIX4 ACPI hotplug registers (0xAE00) (verified by `tools/hotplug-test.sh`)
+- [ ] Interrupt-driven hot-plug (parse ACPI tables, handle GPE) instead of polling
 - [ ] A second processor architecture (aarch64 / riscv64)
 - [ ] Landing the upper brain and brain hot-swap
 - [ ] Naming

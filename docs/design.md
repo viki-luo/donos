@@ -347,7 +347,8 @@ motion[6]   frame   duration_ns   dof   event_count
 - [ ] 接线表的规模与更新语义
 - [x] **执行模型**：已定为设计决定 16，参考实现 `object_run()`（合成时钟下验证）
 - [x] 执行层接入真实时钟：PIT 100 Hz 节拍在主循环中驱动 `object_run`，中断处理只累加节拍
-- [ ] 运行时热插拔（ACPI PCIe hotplug）
+- [x] 运行时热插拔：主循环每 100 ms 重扫 PCI 总线，新设备到达、消失设备离开；拔出通过 QEMU PIIX4 ACPI 热插拔寄存器（0xAE00）弹出（`tools/hotplug-test.sh` 验证）
+- [ ] 热插拔改为中断驱动（解析 ACPI 表、处理 GPE），替代轮询
 - [ ] 第二个处理器架构（aarch64 / riscv64）
 - [ ] 上层大脑的落地与大脑热插拔
 - [ ] 命名
