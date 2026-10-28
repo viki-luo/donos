@@ -109,6 +109,14 @@
   OpenSBI): new `arch/riscv64/` (entry, linker script, 16550 UART, time CSR
   driving the execution layer). `base/` is unchanged and all verification passes
   on riscv64; architecture-specific Makefile options are gathered in one place
+- **参照系姿态旋转**：`object_resolve()` 每升一级先按参照系的姿态四元数旋转运动
+  （线 0..2、角 3..5），再叠加参照系自身的运动；定点乘法用 128 位中间积。
+  `base/verify.c` 增加 4 项断言（不转、转 180°、转 90°、相对旋转参照系静止），
+  x86_64 与 riscv64 均通过
+  / **Frame orientation**: at each level `object_resolve()` first rotates the
+  motion (linear 0..2, angular 3..5) by the frame's orientation quaternion, then
+  adds the frame's own motion; fixed-point multiplication uses a 128-bit
+  intermediate. `base/verify.c` adds 4 assertions, passing on x86_64 and riscv64
 
 ### Changed / 变更
 

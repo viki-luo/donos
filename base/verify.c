@@ -339,6 +339,75 @@ static void verify_frame_resolution(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* 第四部分（续）：参照系姿态旋转                                       */
+/*                                                                    */
+/* 参照系转了角度，相对它的运动也要跟着转，才能得到相对世界的运动。    */
+/* ------------------------------------------------------------------ */
+
+static bool near(motion_fixed_t a, motion_fixed_t b)
+{
+        motion_fixed_t d = a - b;
+        if (d < 0)
+                d = -d;
+        return d < Q(1) / 1000;          /* 定点舍入误差容限 0.001 */
+}
+
+static void set_orientation(wire_t w, motion_fixed_t qw, motion_fixed_t qx,
+                            motion_fixed_t qy, motion_fixed_t qz)
+{
+        object_state_t st;
+        for (u8 i = 0; i < 3; i++) {
+                st.position[i] = 0;
+                st.linear[i]   = 0;
+                st.angular[i]  = 0;
+        }
+        st.orientation[0] = qw;
+        st.orientation[1] = qx;
+        st.orientation[2] = qy;
+        st.orientation[3] = qz;
+        object_set_state(w, &st);
+}
+
+static void verify_frame_rotation(void)
+{
+        arch_puts("\n--- R5: motion rotates with the frame's orientation ---\n\n");
+
+        wire_t a = object_plug(2, 1000000);
+        wire_t b = object_plug(2, 1000000);
+        motion_fixed_t r[MOTION_DOF_MAX];
+
+        /* A 静止于世界；B 相对 A 沿 A 的 x 轴运动 10 */
+        motion_event_t ev = make_event(a, FRAME_WORLD, 1000000000ULL, 3, 0, 0);
+        base_apply(&ev);
+        ev = make_event(b, a, 1000000000ULL, 3, Q(10), 0);
+        base_apply(&ev);
+
+        check("an unrotated frame leaves the motion unchanged (10, 0, 0)",
+              object_resolve(b, r) && r[0] == Q(10) && r[1] == 0);
+
+        /* A 绕 z 轴转 180°：q = {0, 0, 0, 1}，结果应精确为 (-10, 0, 0) */
+        set_orientation(a, 0, 0, 0, Q(1));
+        check("a frame turned 180 deg about z gives (-10, 0, 0)",
+              object_resolve(b, r) && r[0] == -Q(10) && r[1] == 0 && r[2] == 0);
+
+        /* A 绕 z 轴转 90°：q = {cos45, 0, 0, sin45}，结果约为 (0, 10, 0) */
+        motion_fixed_t c45 = 3037000500LL;   /* 0.70710678 x 2^32 */
+        set_orientation(a, c45, 0, 0, c45);
+        bool ok = object_resolve(b, r);
+        check("a frame turned 90 deg about z gives (0, 10, 0)",
+              ok && near(r[0], 0) && near(r[1], Q(10)) && near(r[2], 0));
+
+        /* 相对 A 静止：无论 A 怎么转，解出来都等于 A 自身的运动（这里为 0） */
+        ev = make_event(b, a, 1000000000ULL, 3, 0, 0);
+        base_apply(&ev);
+        check("still relative to a rotated frame stays still",
+              object_resolve(b, r) && r[0] == 0 && r[1] == 0 && r[2] == 0);
+
+        object_unplug(a);
+        object_unplug(b);
+}
+
+/* ------------------------------------------------------------------ */
 /* 第五部分：执行模型（设计决定 16）                                    */
 /*                                                                    */
 /* 基座不调度。各物件按自己申报的 period_ns 被执行层推进，时间由调用者  */
@@ -403,6 +472,7 @@ int base_verify(void)
         verify_unified();
         verify_self_description();
         verify_frame_resolution();
+        verify_frame_rotation();
         verify_execution();
 
         arch_puts("\n  failures = ");

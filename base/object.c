@@ -258,6 +258,34 @@ bool object_state(wire_t w, object_state_t *out)
 /* 参照系解算（方案 A：物件自己解，物件间直连）                         */
 /* ------------------------------------------------------------------ */
 
+/* Q32.32 乘法：128 位中间积，避免溢出；不涉及除法，不需要编译器运行库 */
+static motion_fixed_t qmul(motion_fixed_t a, motion_fixed_t b)
+{
+        return (motion_fixed_t)(((__int128)a * b) >> 32);
+}
+
+/*
+ * 用单位四元数 q = {w, x, y, z} 旋转三维向量 v：
+ *     t  = 2 (u × v)
+ *     v' = v + w t + u × t        其中 u = (x, y, z)
+ *
+ * 全零四元数视为「未申报姿态」，按无旋转处理。
+ */
+static void rotate3(const motion_fixed_t q[4], motion_fixed_t v[3])
+{
+        if (q[0] == 0 && q[1] == 0 && q[2] == 0 && q[3] == 0)
+                return;
+
+        motion_fixed_t w = q[0], x = q[1], y = q[2], z = q[3];
+        motion_fixed_t t0 = 2 * (qmul(y, v[2]) - qmul(z, v[1]));
+        motion_fixed_t t1 = 2 * (qmul(z, v[0]) - qmul(x, v[2]));
+        motion_fixed_t t2 = 2 * (qmul(x, v[1]) - qmul(y, v[0]));
+
+        v[0] += qmul(w, t0) + qmul(y, t2) - qmul(z, t1);
+        v[1] += qmul(w, t1) + qmul(z, t0) - qmul(x, t2);
+        v[2] += qmul(w, t2) + qmul(x, t1) - qmul(y, t0);
+}
+
 bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX])
 {
         object_t *o = find_by_wire(w);
@@ -275,6 +303,14 @@ bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX])
                 object_t *f = find_by_wire(frame);
                 if (f == 0)
                         return false;           /* 参照系已离开 */
+
+                /*
+                 * out 是在参照系 f 的局部坐标下表达的运动：先按 f 的姿态
+                 * 转到 f 的上一级坐标，再叠加 f 自身的运动。
+                 * 线运动（0..2）与角运动（3..5）都是三维向量，各转一次。
+                 */
+                rotate3(f->state.orientation, &out[0]);
+                rotate3(f->state.orientation, &out[3]);
 
                 for (u8 i = 0; i < MOTION_DOF_MAX; i++)
                         out[i] += f->motion[i];

@@ -106,7 +106,8 @@ bool object_state(wire_t w, object_state_t *out);
  * 参照系已离开、链断开或成环时返回 false：基座只校验 frame 这条线
  * 当下是否有效，发现不了环，环只能由物件侧发现。
  *
- * 参考实现只做逐分量相加（平移合成），不按参照系姿态旋转。
+ * 每升一级，先按参照系的姿态四元数把运动（线 0..2、角 3..5）旋转到上一级
+ * 坐标，再叠加参照系自身的运动。未申报姿态（全零四元数）视为无旋转。
  */
 bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX]);
 
