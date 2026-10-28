@@ -20,14 +20,30 @@ CC        := clang
 LD        := clang
 AS        := nasm
 OBJCOPY   := llvm-objcopy
-QEMU      := qemu-system-x86_64
+
+# ---------------------------------------------------------------------
+# 架构相关参数。base/ 的编译选项与架构无关，只有这一段随 ARCH 变化。
+# ---------------------------------------------------------------------
+ifeq ($(ARCH),x86_64)
+ARCH_CFLAGS := -mcmodel=kernel -mno-red-zone -mno-sse -mno-sse2 -mno-mmx \
+               -mgeneral-regs-only
+QEMU        := qemu-system-x86_64
+QEMUFLAGS   := -m 256M -serial stdio -display none -no-reboot -no-shutdown
+else ifeq ($(ARCH),riscv64)
+# rv64imac：无浮点扩展，基座本就不碰浮点
+ARCH_CFLAGS := -march=rv64imac -mabi=lp64 -mcmodel=medany -mno-relax
+QEMU        := qemu-system-riscv64
+QEMUFLAGS   := -machine virt -bios default -m 256M -serial stdio \
+               -display none -no-reboot
+else
+$(error 不支持的 ARCH=$(ARCH)，可选 x86_64 / riscv64)
+endif
 
 CFLAGS    := --target=$(TARGET_TRIPLE) \
              -std=gnu11 -O2 -g \
              -ffreestanding -fno-stack-protector \
-             -fno-pic -fno-pie -mcmodel=kernel \
-             -mno-red-zone -mno-sse -mno-sse2 -mno-mmx \
-             -mgeneral-regs-only \
+             -fno-pic -fno-pie \
+             $(ARCH_CFLAGS) \
              -Wall -Wextra -Werror \
              -Ibase/include -Iarch/$(ARCH)/include
 
@@ -50,20 +66,21 @@ ifdef FAULT_TEST
 CFLAGS    += -DFAULT_TEST
 endif
 
-QEMUFLAGS := -m 256M -serial stdio -display none -no-reboot -no-shutdown
-
 # ---------------------------------------------------------------------
 # 源文件
 # ---------------------------------------------------------------------
 C_SRCS := $(wildcard base/*.c) \
           $(wildcard arch/$(ARCH)/*.c)
 
+# x86_64 用 nasm（.asm）；riscv64 用 clang 汇编（.S）
 ASM_SRCS := $(wildcard arch/$(ARCH)/*.asm)
+S_SRCS   := $(wildcard arch/$(ARCH)/*.S)
 
 C_OBJS   := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS))
 ASM_OBJS := $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
+S_OBJS   := $(patsubst %.S,$(BUILD)/%.o,$(S_SRCS))
 
-OBJS := $(ASM_OBJS) $(C_OBJS)
+OBJS := $(ASM_OBJS) $(S_OBJS) $(C_OBJS)
 
 # ---------------------------------------------------------------------
 .PHONY: all run debug clean size dirs
@@ -80,6 +97,10 @@ $(BUILD)/%.o: %.c | dirs
 $(BUILD)/%.o: %.asm | dirs
 	@mkdir -p $(dir $@)
 	$(AS) $(ASFLAGS) $< -o $@
+
+$(BUILD)/%.o: %.S | dirs
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD)/$(OUT): $(OBJS)
 	$(LD) $(LDFLAGS) -o $@ $(OBJS)

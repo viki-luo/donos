@@ -348,6 +348,7 @@ Just as IP is the narrow waist of the network: everything passes over it, yet ap
 - [x] Execution layer driven by a real clock: 100 Hz PIT ticks drive `object_run` from the main loop; the interrupt handler only counts ticks
 - [x] Runtime hot-plug: the main loop rescans the PCI bus every 100 ms; new devices arrive and vanished ones depart; removal is completed through the QEMU PIIX4 ACPI hotplug registers (0xAE00) (verified by `tools/hotplug-test.sh`)
 - [ ] Interrupt-driven hot-plug (parse ACPI tables, handle GPE) instead of polling
-- [ ] A second processor architecture (aarch64 / riscv64)
+- [x] A second processor architecture: riscv64 (QEMU virt + OpenSBI, `make ARCH=riscv64`), with `base/` unchanged and all verification passing
+- [ ] riscv64 timer interrupts and PCI / virtio bus discovery (currently polls the time CSR, no bus discovery)
 - [ ] Landing the upper brain and brain hot-swap
 - [ ] Naming

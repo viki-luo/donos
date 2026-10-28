@@ -102,6 +102,13 @@
   ones depart; removal requests are completed through the QEMU PIIX4 ACPI hotplug
   registers (0xAE00). New `tools/hotplug-test.sh` adds and removes an e1000 NIC
   while the kernel runs
+- **第二个处理器架构 riscv64**（`make ARCH=riscv64`，QEMU virt + OpenSBI）：
+  新增 `arch/riscv64/`（入口、链接脚本、16550 串口、time CSR 驱动执行层）。
+  `base/` 未改一行，全部验证在 riscv64 上通过；Makefile 的架构相关选项集中到一处
+  / **Second processor architecture, riscv64** (`make ARCH=riscv64`, QEMU virt +
+  OpenSBI): new `arch/riscv64/` (entry, linker script, 16550 UART, time CSR
+  driving the execution layer). `base/` is unchanged and all verification passes
+  on riscv64; architecture-specific Makefile options are gathered in one place
 
 ### Changed / 变更
 

@@ -136,7 +136,7 @@ exception handler, build once with `make FAULT_TEST=1`.*
 - [x] 运行时热插拔（轮询 PCI 总线，`tools/hotplug-test.sh` 验证）/ Runtime hot-plug (PCI bus polling, verified by `tools/hotplug-test.sh`)
 - [ ] 中断驱动的热插拔（ACPI GPE）/ Interrupt-driven hot-plug (ACPI GPE)
 - [ ] 接线表规模与更新语义 / Wiring table scale and update semantics
-- [ ] 第二个处理器架构 / A second processor architecture
+- [x] 第二个处理器架构：riscv64（`make ARCH=riscv64`，QEMU virt + OpenSBI），`base/` 未改一行 / A second processor architecture: riscv64, with `base/` unchanged
 - [ ] 上层大脑（大脑热拔插）/ The upper brain (brain hot-swap)
 
 ---
