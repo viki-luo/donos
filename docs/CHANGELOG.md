@@ -125,6 +125,14 @@
   properties are readable and gone after departure); new `object_declared()`
   keeps the arrival-time `unit` / `period_ns` on the object side for the brain.
   R1–R8 are now all tested or type-enforced
+- **riscv64 总线发现**：PCI 驱动移到两种架构共用的 `drivers/pci.c`；配置空间访问与
+  热插拔弹出改由架构层的 `arch_pci_read32()` / `arch_pci_eject_pending()` 提供
+  （x86_64 端口 I/O，riscv64 ECAM 0x30000000）。QEMU virt 上发现主桥、e1000、virtio-net
+  / **riscv64 bus discovery**: the PCI driver moves to `drivers/pci.c`, shared by both
+  architectures; configuration-space access and hotplug eject are supplied by the
+  architecture layer through `arch_pci_read32()` / `arch_pci_eject_pending()`
+  (x86_64 port I/O, riscv64 ECAM at 0x30000000). On QEMU virt it finds the host
+  bridge, an e1000 and a virtio-net device
 
 ### Changed / 变更
 

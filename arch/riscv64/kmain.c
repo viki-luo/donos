@@ -10,6 +10,7 @@
  */
 #include "arch.h"
 #include "base.h"
+#include "bus.h"
 #include "object.h"
 #include "verify.h"
 
@@ -26,6 +27,9 @@ void kernel_main(u64 hartid, u64 dtb)
 
         base_init();
         object_init();
+
+        /* 总线发现：与 x86_64 共用 drivers/pci.c，配置空间走 ECAM */
+        pci_discover();
 
         base_verify();
 

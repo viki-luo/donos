@@ -22,4 +22,12 @@ u32 pci_discover(void);
  */
 u32 pci_poll(void);
 
+/* ---- 由各架构提供 ---- */
+
+/* 读 PCI 配置空间一个 32 位字。不存在的设备读回全 1。 */
+u32 arch_pci_read32(u8 bus, u8 slot, u8 func, u8 off);
+
+/* 对热插拔控制器标记为「请求拔出」的槽位执行弹出；无控制器时什么都不做。 */
+void arch_pci_eject_pending(void);
+
 #endif /* LITEOS_BUS_H */

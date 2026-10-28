@@ -45,7 +45,7 @@ CFLAGS    := --target=$(TARGET_TRIPLE) \
              -fno-pic -fno-pie \
              $(ARCH_CFLAGS) \
              -Wall -Wextra -Werror \
-             -Ibase/include -Iarch/$(ARCH)/include
+             -Ibase/include -Idrivers/include -Iarch/$(ARCH)/include
 
 # 用 clang 驱动链接，它会按 --target 选择 ELF 模式并使用 lld。
 # 直接调 ld.lld 在 MSYS2 上会误用 PE 驱动。
@@ -70,6 +70,7 @@ endif
 # 源文件
 # ---------------------------------------------------------------------
 C_SRCS := $(wildcard base/*.c) \
+          $(wildcard drivers/*.c) \
           $(wildcard arch/$(ARCH)/*.c)
 
 # x86_64 用 nasm（.asm）；riscv64 用 clang 汇编（.S）

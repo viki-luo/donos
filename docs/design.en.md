@@ -343,6 +343,7 @@ Just as IP is the narrow waist of the network: everything passes over it, yet ap
 - [x] Runtime hot-plug: the main loop rescans the PCI bus every 100 ms; new devices arrive and vanished ones depart; removal is completed through the QEMU PIIX4 ACPI hotplug registers (0xAE00) (verified by `tools/hotplug-test.sh`)
 - [ ] Interrupt-driven hot-plug (parse ACPI tables, handle GPE) instead of polling
 - [x] A second processor architecture: riscv64 (QEMU virt + OpenSBI, `make ARCH=riscv64`), with `base/` unchanged and all verification passing
-- [ ] riscv64 timer interrupts and PCI / virtio bus discovery (currently polls the time CSR, no bus discovery)
+- [x] riscv64 bus discovery: shares `drivers/pci.c` with x86_64; configuration space is accessed through ECAM (0x30000000)
+- [ ] riscv64 timer interrupts (currently polls the time CSR) and runtime hot-plug (the virt root bus does not support eject)
 - [ ] Landing the upper brain and brain hot-swap
 - [ ] Naming

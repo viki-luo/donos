@@ -16,18 +16,17 @@
  *   启动时扫描一次（pci_discover），之后主循环周期性重扫（pci_poll），
  *   与上一次的结果比对：新出现的设备「到达」，消失的设备「离开」。
  *
- *   拔出需要客体配合：QEMU 的 PIIX4 ACPI 热插拔控制器在 0xAE00 处
- *   标记「请求拔出」的槽位，操作系统写回弹出寄存器后设备才真正移除。
- *   这里不解释 ACPI 表，只直接读写这组寄存器。
+ *   拔出需要客体配合（如 x86_64 上 QEMU 的 PIIX4 ACPI 热插拔控制器），
+ *   由架构层的 arch_pci_eject_pending() 完成。
+ *
+ * 本文件与处理器架构无关：配置空间如何访问（x86_64 端口 I/O、
+ * riscv64 ECAM 内存映射）由架构层的 arch_pci_read32() 提供。
  *
  * 当前只扫描总线 0。多总线需要解析 PCI-to-PCI 桥，属于后续工作。
  */
-#include "arch.h"
 #include "bus.h"
 #include "object.h"
-
-#define PCI_CONFIG_ADDR 0xCF8
-#define PCI_CONFIG_DATA 0xCFC
+#include "report.h"
 
 #define PCI_VENDOR_ID   0x00
 #define PCI_CLASS_REV   0x08
@@ -35,12 +34,6 @@
 
 #define PCI_SLOTS 32
 #define PCI_FUNCS 8
-
-/* QEMU PIIX4 ACPI PCI 热插拔寄存器（hw/acpi/pcihp.c） */
-#define PCIHP_BASE  0xAE00
-#define PCIHP_DOWN  (PCIHP_BASE + 0x04)   /* 请求拔出的槽位位图 */
-#define PCIHP_EJECT (PCIHP_BASE + 0x08)   /* 写入槽位位图即弹出 */
-#define PCIHP_SEL   (PCIHP_BASE + 0x10)   /* 总线选择，总线 0 为 0 */
 
 /*
  * 上一次扫描看到的设备。这是总线驱动自己的记录，不在基座里：
@@ -57,14 +50,7 @@ static pci_known_t known[PCI_SLOTS][PCI_FUNCS];
 
 static u32 pci_read32(u8 bus, u8 slot, u8 func, u8 off)
 {
-        u32 addr = 0x80000000u
-                 | ((u32)bus  << 16)
-                 | ((u32)(slot & 0x1Fu) << 11)
-                 | ((u32)(func & 0x07u) << 8)
-                 | ((u32)off & 0xFCu);
-
-        arch_outl(PCI_CONFIG_ADDR, addr);
-        return arch_inl(PCI_CONFIG_DATA);
+        return arch_pci_read32(bus, slot, func, off);
 }
 
 /* 只打印低 digits 位十六进制，避免 0x00008086 这种噪音 */
@@ -217,20 +203,8 @@ u32 pci_discover(void)
         return found;
 }
 
-/*
- * 对请求拔出的槽位执行弹出。没有热插拔控制器时端口读回全 1，忽略。
- */
-static void pcihp_eject_pending(void)
-{
-        arch_outl(PCIHP_SEL, 0);
-        u32 down = arch_inl(PCIHP_DOWN);
-        if (down == 0 || down == 0xFFFFFFFFu)
-                return;
-        arch_outl(PCIHP_EJECT, down);
-}
-
 u32 pci_poll(void)
 {
-        pcihp_eject_pending();
+        arch_pci_eject_pending();
         return scan("  [hotplug] arrive  ", "  [hotplug] depart  ");
 }
