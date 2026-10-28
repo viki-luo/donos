@@ -91,13 +91,7 @@ wire_t object_plug(u32 unit, u64 period_ns)
                 if (objects[i].in_use)
                         continue;
 
-                wire_desc_t d;
-                d.id = WIRE_NONE;
-                d.unit = unit;
-                d.period_ns = period_ns;
-                d.online = true;
-
-                wire_t w = base_arrive(&d);
+                wire_t w = base_arrive();
                 if (w == WIRE_NONE)
                         return WIRE_NONE;
 

@@ -128,6 +128,14 @@
 
 ### Changed / 变更
 
+- **基座不再接收任何自述属性（设计决定 17）**：删除 `wire_desc_t`，`base_arrive()`
+  改为无参数；接线表每槽只剩世代号与在用标记。`unit` / `period_ns` 只保存在物件侧，
+  大脑经 `object_declared()` 直读。`object_plug()` 签名不变
+  / **The base no longer receives any self-declared properties (decision 17)**:
+  `wire_desc_t` is removed and `base_arrive()` takes no arguments; each wiring-table
+  slot holds only a generation and an in-use flag. `unit` / `period_ns` live only on
+  the object side, read by the brain through `object_declared()`. `object_plug()`
+  keeps its signature
 - **确立统一模型：一切皆是运动物件**。大脑不再是一个独立类别，而是「恰好正在
   驱动基座」的普通接线 —— 没有「大脑槽」，换大脑与物件热插拔是同一个机制，
   基座对称且不授权；**基座是唯一的非物件**（纯函数）

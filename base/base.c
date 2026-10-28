@@ -28,9 +28,8 @@
 #define WIRE_MAX 64
 
 typedef struct {
-        wire_desc_t desc;
-        u32         generation;   /* 该槽位被用过的次数，防止旧句柄复活 */
-        bool        in_use;
+        u32  generation;   /* 该槽位被用过的次数，防止旧句柄复活 */
+        bool in_use;
 } wire_slot_t;
 
 static wire_slot_t wire_table[WIRE_MAX];
@@ -47,10 +46,6 @@ void base_init(void)
         for (u64 i = 0; i < WIRE_MAX; i++) {
                 wire_table[i].in_use = false;
                 wire_table[i].generation = 0;
-                wire_table[i].desc.id = WIRE_NONE;
-                wire_table[i].desc.unit = 0;
-                wire_table[i].desc.period_ns = 0;
-                wire_table[i].desc.online = false;
         }
 }
 
@@ -86,11 +81,8 @@ static wire_slot_t *slot_of(wire_t w)
         return s;
 }
 
-wire_t base_arrive(const wire_desc_t *desc)
+wire_t base_arrive(void)
 {
-        if (desc == 0)
-                return WIRE_NONE;
-
         for (u64 i = 0; i < WIRE_MAX; i++) {
                 if (!wire_table[i].in_use) {
                         /* 世代号单调递增，0 保留给「无」 */
@@ -98,13 +90,9 @@ wire_t base_arrive(const wire_desc_t *desc)
                         if (wire_table[i].generation == 0)
                                 wire_table[i].generation = 1;
 
-                        wire_table[i].desc = *desc;
                         wire_table[i].in_use = true;
-                        wire_table[i].desc.id =
-                                WIRE_MAKE(wire_table[i].generation, (u32)(i + 1));
-                        wire_table[i].desc.online = true;
 
-                        return wire_table[i].desc.id;
+                        return WIRE_MAKE(wire_table[i].generation, (u32)(i + 1));
                 }
         }
 
@@ -123,16 +111,11 @@ void base_depart(wire_t w)
          * 物件离开后，基座对它就一无所知，这是设计要求。
          */
         s->in_use = false;
-        s->desc.id = WIRE_NONE;
-        s->desc.online = false;
-        s->desc.period_ns = 0;
-        s->desc.unit = 0;
 }
 
 bool base_wire_valid(wire_t w)
 {
-        wire_slot_t *s = slot_of(w);
-        return s != 0 && s->in_use && s->desc.online;
+        return slot_of(w) != 0;
 }
 
 /* ------------------------------------------------------------------ */

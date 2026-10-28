@@ -161,11 +161,12 @@ static void verify_unified(void)
          * ---- 断言 3：基座在结构上无法区分二者 ----
          *
          * 这不是一句断言能「跑」出来的，而是由类型的形状决定的：
-         * wire_desc_t   = { id, unit, period_ns, online }
+         * base_arrive()   不带任何参数
          * motion_event_t = { wire, frame, duration_ns, dof, motion[] }
          * 两者都没有「种类」字段，所以基座没有任何依据去区分。
          */
-        arch_puts("  note: wire_desc_t and motion_event_t carry no 'kind' field,\n");
+        arch_puts("  note: base_arrive() takes no arguments and motion_event_t carries\n");
+        arch_puts("        no 'kind' field,\n");
         arch_puts("        so the base is structurally unable to tell them apart\n");
 
         /* ---- 断言 4：换大脑 = depart + arrive，手脚不受影响 ---- */

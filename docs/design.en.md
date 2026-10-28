@@ -169,7 +169,7 @@ All data crossing the base boundary, in one place. **There are only three routes
 
 | Direction | Interface | Content | Is it state? |
 |---|---|---|---|
-| object → base | `base_arrive(wire_desc_t)` | `unit`, `period_ns` | no, wiring metadata, once at arrival |
+| object → base | `base_arrive()` | nothing (the arrival itself) | no, an arrival notice |
 | object → base | `base_depart(wire_t)` | the handle | no, a departure notice |
 | brain → base | `base_apply(motion_event_t)` | see below | no, a command |
 | base → object | `object_submit(wire, motion_event_t)` | the same struct | no, a command |
@@ -198,16 +198,9 @@ payload            priority                  callbacks
 
 #### Everything received from an object
 
-```c
-typedef struct {
-        wire_t   id;          /* filled in by the base */
-        uint32_t unit;        /* unit semantics: 0=none 1=deg 2=mm 3=rad ... */
-        uint64_t period_ns;   /* the control period the object reports for itself */
-        bool     online;      /* set by the base */
-} wire_desc_t;
-```
+**Nothing.** `base_arrive()` takes no arguments: the arrival itself is the whole content.
 
-Only `unit` and `period_ns` genuinely come from the object — properties of the wiring, not "where it is now or whether it is moving".
+Self-declared properties such as unit and control period are kept by the object and read directly by the brain through `object_declared()`, never through the base (decision 17). About a wire the base knows only one thing: whether it is alive right now.
 
 So an object has exactly **two forms of existence** in the whole system: **alive** (handle valid and generation matching) and **non-existent** (a dead handle). Binary, with no third.
 
@@ -337,6 +330,7 @@ Just as IP is the narrow waist of the network: everything passes over it, yet ap
 14. **Wire handles stay stable across slot reuse**: encoded as `(generation << 16) | slot` with a monotonic generation. A departed handle never comes back to life — otherwise, after a hot-plug, an old brain would command whatever new object took the same slot
 15. **Objects resolve their own frame (option A)**: an object walks the frame chain and reads each frame object's motion directly — **objects may connect to each other directly**, never through the base. The base only checks that the `frame` wire is valid right now; it cannot see the chain and therefore cannot detect cycles. Cycles and broken chains are detected and rejected on the object side
 16. **The execution model lives outside the base**: an execution layer advances each object's motion loop at the `period_ns` the object declared on arrival; time is supplied by the caller (the architecture clock), and the base neither schedules nor keeps time. Objects with no declared period (`period_ns = 0`) are never advanced; a late run does not catch up but reschedules from the current time
+17. **About a wire the base knows only whether it is alive**: `base_arrive()` takes no arguments, and each wiring-table slot holds only a generation and an in-use flag. Self-declared properties such as unit and control period are kept by the object and read directly by the brain through `object_declared()`, never through the base
 
 ---
 
