@@ -464,6 +464,52 @@ static void verify_execution(void)
         object_unplug(idle);
 }
 
+/* ------------------------------------------------------------------ */
+/* 第六部分：符合性标准 R1–R3（docs/conformance.md）                    */
+/* ------------------------------------------------------------------ */
+
+static void verify_conformance(void)
+{
+        arch_puts("\n--- conformance: R1-R3 ---\n\n");
+
+        wire_t o = object_plug(2, 1 * MS);
+        motion_event_t ev;
+
+        /* R1：单一控制面 —— 静止不需要第二种指令，只是 motion 取零的事件 */
+        ev = make_event(o, FRAME_WORLD, 1000000000ULL, 1, 5, 0);
+        base_apply(&ev);
+        ev = make_event(o, FRAME_WORLD, 1000000000ULL, 1, 0, 0);
+        check("R1 a zero-motion event makes the object still",
+              base_apply(&ev) == MOTION_OK && object_is_still(o));
+        ev = make_event(o, FRAME_WORLD, 1000000000ULL, 0, 0, 0);
+        check("R1 a zero-dof event is also accepted as still",
+              base_apply(&ev) == MOTION_OK && object_is_still(o));
+
+        /* R2：自持 —— 事件有效期 2 ms，到期后物件仍按该事件继续运动 */
+        ev = make_event(o, FRAME_WORLD, 2 * MS, 1, 4, 0);
+        base_apply(&ev);
+        u32 before = object_step_count(o);
+        for (u64 t = 1; t <= 5; t++)
+                object_run(t * MS);
+
+        object_state_t st;
+        bool ok = object_state(o, &st);
+        check("R2 the object keeps stepping after the event expires",
+              object_step_count(o) - before == 5);
+        check("R2 position keeps integrating past the duration (5 x 4 = 20)",
+              ok && st.position[0] == 20);
+
+        /* R3：自述接线属性 —— 到达时申报的 unit / period_ns 可由大脑直读 */
+        u32 unit = 0;
+        u64 period = 0;
+        check("R3 declared unit and period are readable",
+              object_declared(o, &unit, &period) && unit == 2 && period == 1 * MS);
+
+        object_unplug(o);
+        check("R3 a departed object no longer declares anything",
+              !object_declared(o, &unit, &period));
+}
+
 int base_verify(void)
 {
         failures = 0;
@@ -474,6 +520,7 @@ int base_verify(void)
         verify_frame_resolution();
         verify_frame_rotation();
         verify_execution();
+        verify_conformance();
 
         arch_puts("\n  failures = ");
         arch_putdec((u64)failures);

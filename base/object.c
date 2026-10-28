@@ -23,6 +23,7 @@ typedef struct {
         u64            duration_ns;
         u8             dof;
         u32            event_count;
+        u32            unit;          /* 物件自述的单位语义（R3） */
         u64            period_ns;     /* 物件自述的控制周期，由执行层兑现 */
         u64            next_due_ns;   /* 下一次运动环到期时刻；0 = 尚未起步 */
         u32            step_count;
@@ -56,6 +57,7 @@ void object_init(void)
                 objects[i].duration_ns = 0;
                 objects[i].dof = 0;
                 objects[i].event_count = 0;
+                objects[i].unit = 0;
                 objects[i].period_ns = 0;
                 objects[i].next_due_ns = 0;
                 objects[i].step_count = 0;
@@ -105,6 +107,7 @@ wire_t object_plug(u32 unit, u64 period_ns)
                 objects[i].duration_ns = 0;
                 objects[i].dof = 0;
                 objects[i].event_count = 0;
+                objects[i].unit = unit;
                 objects[i].period_ns = period_ns;
                 objects[i].next_due_ns = 0;
                 objects[i].step_count = 0;
@@ -372,4 +375,15 @@ u32 object_step_count(wire_t w)
 {
         object_t *o = find_by_wire(w);
         return o == 0 ? 0 : o->step_count;
+}
+
+bool object_declared(wire_t w, u32 *unit, u64 *period_ns)
+{
+        object_t *o = find_by_wire(w);
+        if (o == 0 || unit == 0 || period_ns == 0)
+                return false;
+
+        *unit = o->unit;
+        *period_ns = o->period_ns;
+        return true;
 }

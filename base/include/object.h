@@ -125,6 +125,12 @@ u32 object_run(u64 now_ns);
 /* 该物件的运动环累计被推进了多少步。 */
 u32 object_step_count(wire_t w);
 
+/*
+ * 读取物件到达时自述的接线属性（R3）。接线无效返回 false。
+ * 这是物件侧保存的那一份，供大脑直读，不经过基座。
+ */
+bool object_declared(wire_t w, u32 *unit, u64 *period_ns);
+
 /* ---- 只读查询（自检与调试用）---- */
 
 /* 该物件当前是否相对其参照系静止（所有有效分量为零）。 */

@@ -117,6 +117,14 @@
   motion (linear 0..2, angular 3..5) by the frame's orientation quaternion, then
   adds the frame's own motion; fixed-point multiplication uses a 128-bit
   intermediate. `base/verify.c` adds 4 assertions, passing on x86_64 and riscv64
+- **符合性标准 R1–R3 自动检验**：`base/verify.c` 增加 6 项断言（零运动即静止、
+  事件到期后继续运动、申报属性可读且离开后失效）；新增 `object_declared()`，
+  物件侧保存到达时申报的 `unit` / `period_ns` 供大脑直读。R1–R8 现均已检验或由类型保证
+  / **Automated R1–R3 conformance checks**: `base/verify.c` adds 6 assertions
+  (zero motion means still, motion continues after the event expires, declared
+  properties are readable and gone after departure); new `object_declared()`
+  keeps the arrival-time `unit` / `period_ns` on the object side for the brain.
+  R1–R8 are now all tested or type-enforced
 
 ### Changed / 变更
 

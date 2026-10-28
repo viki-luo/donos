@@ -20,9 +20,9 @@ It is not necessarily a bad object; accepting it would require a second primitiv
 
 | # | Requirement | Meaning | How to check | Verification |
 |---|---|---|---|---|
-| **R1** | Single control surface | Driven only by `motion_event_t`; no second kind of command exists | With all motion set to 0, the object becomes relatively still without errors or other commands | reasoning |
-| **R2** | Self-sustaining | Keeps moving after an event expires; the base does not keep feeding it | Stop sending after `duration_ns` expires; the object is still moving (pick-and-place model) | reasoning |
-| **R3** | Self-declared wiring properties | Declares `unit` and `period_ns` on arrival | Both `wire_desc_t` fields carry real values | reasoning |
+| **R1** | Single control surface | Driven only by `motion_event_t`; no second kind of command exists | With all motion set to 0, the object becomes relatively still without errors or other commands | **tested** |
+| **R2** | Self-sustaining | Keeps moving after an event expires; the base does not keep feeding it | Stop sending after `duration_ns` expires; the object is still moving (pick-and-place model) | **tested** |
+| **R3** | Self-declared wiring properties | Declares `unit` and `period_ns` on arrival | The brain can read the declared values directly through `object_declared()`; they are gone after departure | **tested** |
 | **R4** | Fixed-point boundary | No floating point crosses the boundary | `motion[]` accepts only Q32.32; floats are allowed inside, not at the boundary | type-enforced |
 | **R5** | Referenceable | Can serve as another object's `frame`, and can resolve the `frame` it receives | Resolves motion relative to the world along the frame chain; cycles and broken chains must be rejected | **tested** |
 | **R6** | Self-held state, direct to the brain | State never appears in the base; only the brain can see it | The base has no interface that reads object state | type-enforced |
@@ -80,4 +80,4 @@ Here the standard defines the object's self-description format, the base only ca
 
 - [x] **Who resolves `frame`**: settled as **option A, the object resolves it** (decision 15). An object walks the frame chain and reads each frame object's motion directly — **objects may connect to each other directly**, never through the base. The base cannot see the chain; cycles and broken chains are detected and rejected on the object side. At each level the reference `object_resolve()` first rotates the motion (linear and angular, three dimensions each) by the frame's orientation quaternion, then adds the frame's own motion; an undeclared orientation counts as no rotation.
 - [x] **`period_ns` is honoured by the execution layer** (decision 16): `object_run(now_ns)` advances each object's motion loop at its declared period, and the base still does not schedule. Verified under a synthetic clock; at runtime it is driven by 100 Hz PIT ticks.
-- [ ] **Conformance test suite.** R1–R3 have no automated check yet.
+- [x] **Conformance test suite**: R1–R3, R5, R7 and R8 are checked automatically by `base/verify.c`, passing on x86_64 and riscv64; R4 and R6 are enforced by the types.
