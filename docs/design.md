@@ -345,6 +345,7 @@ motion[6]   frame   duration_ns   dof   event_count
 - [ ] 热插拔改为中断驱动（解析 ACPI 表、处理 GPE），替代轮询
 - [x] 第二个处理器架构：riscv64（QEMU virt + OpenSBI，`make ARCH=riscv64`），`base/` 未改一行，全部验证通过
 - [x] riscv64 总线发现：与 x86_64 共用 `drivers/pci.c`，配置空间经 ECAM（0x30000000）访问
-- [ ] riscv64 定时器中断（目前轮询 time CSR）与运行时热插拔（virt 根总线不支持弹出）
+- [x] riscv64 定时器中断：CLINT 经 SBI TIME 扩展（EID 0x54494D45）编程，S 态经 `stvec` 处理陷阱累加节拍；主循环 `wfi` 等中断，与 x86_64 的 PIT 语义一致
+- [ ] riscv64 运行时热插拔（virt 根总线不支持弹出）
 - [ ] 上层大脑的落地与大脑热插拔
 - [ ] 命名

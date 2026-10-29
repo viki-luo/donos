@@ -133,6 +133,18 @@
   architecture layer through `arch_pci_read32()` / `arch_pci_eject_pending()`
   (x86_64 port I/O, riscv64 ECAM at 0x30000000). On QEMU virt it finds the host
   bridge, an e1000 and a virtio-net device
+- **riscv64 定时器中断**：新增 `arch/riscv64/trap.c` 与 `traps.S`（`stvec` 直接模式，
+  保存全部寄存器后调用 `trap_dispatch`）。定时器经 SBI TIME 扩展（EID 0x54494D45）
+  编程 —— OpenSBI 用 PMP 把 CLINT（0x02000000）设为 S 态无访问权限，直读写分别得到
+  scause 5 与 scause 7，实测 pmpcfg0 确认。主循环 `wfi` 等中断，节拍与步数一致
+  （关中断读节拍以避免丢唤醒竞态）
+  / **riscv64 timer interrupts**: new `arch/riscv64/trap.c` and `traps.S` (`stvec`
+  in direct mode; all registers are saved before calling `trap_dispatch`). The timer
+  is programmed through the SBI TIME extension (EID 0x54494D45) — OpenSBI marks the
+  CLINT (0x02000000) as S-mode no-access through PMP, so a direct read or write
+  raises scause 5 or scause 7 respectively, confirmed by reading pmpcfg0. The main
+  loop waits in `wfi`; ticks and steps now agree, with interrupts disabled around
+  the tick read to avoid a lost-wakeup race
 
 ### Changed / 变更
 

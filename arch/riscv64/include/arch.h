@@ -30,4 +30,23 @@ static inline u64 arch_time_ns(void)
         return arch_time() * (1000000000ULL / ARCH_TIME_HZ);
 }
 
+/* ------------------------------------------------------------------ */
+/* 定时器中断                                                          */
+/* ------------------------------------------------------------------ */
+
+/* 每个节拍对应的 time 计数周期数：10 MHz / 100 Hz = 100000 */
+#define ARCH_TICK_CYCLES 100000ULL
+
+/* 建立陷阱向量，编程 CLINT 定时器，并在 sstatus 中打开 S 态中断。 */
+void arch_timer_init(u64 hartid);
+
+void arch_irq_enable(void);
+void arch_irq_disable(void);
+
+/* 自开机以来经过的节拍数，由定时器中断累加。 */
+u64 arch_ticks(void);
+
+/* 每节拍对应的纳秒数 */
+#define ARCH_NS_PER_TICK (1000000000ULL / (ARCH_TIME_HZ / ARCH_TICK_CYCLES))
+
 #endif /* LITEOS_ARCH_H */
