@@ -1,0 +1,20 @@
+# 依赖更新 / Dependency updates
+#
+# 本项目没有第三方 C 库依赖，唯一可自动更新的是 CI 里的 GitHub Actions。
+# This project has no third-party C library dependencies; the only thing worth
+# automating is the GitHub Actions used by CI.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      # 与 Conventional Commits 保持一致
+      # Keeps commit messages consistent with Conventional Commits
+      prefix: "build"
+      include: scope
+    labels:
+      - dependencies
+      - build

@@ -6,7 +6,9 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Language: C](https://img.shields.io/badge/language-C11-blue.svg)](https://en.wikipedia.org/wiki/C11_(C_standard_revision))
-[![Status: Design](https://img.shields.io/badge/status-design-orange.svg)](#项目状态--project-status)
+[![Status: Prototype](https://img.shields.io/badge/status-prototype-orange.svg)](#项目状态--project-status)
+[![Docs: bilingual](https://img.shields.io/badge/docs-%E4%B8%AD%E8%8B%B1%E5%8F%8C%E8%AF%AD%20%7C%20bilingual-informational.svg)](docs/README.md)
+[![Security: prototype, no isolation](https://img.shields.io/badge/security-no%20isolation-red.svg)](SECURITY.md)
 
 ---
 
@@ -110,11 +112,15 @@ and performance measurements on both architectures:
 make ARCH=x86_64
 make ARCH=riscv64
 tools/bench.sh
+
+# 等价的一条命令（CI 跑的就是它）
+make check
 ```
 
 评估结论必须同时阅读性能数字与安全限制：当前最坏推进约占 100 Hz
 节拍的 1% 至 2%，但尚无用户态、W^X、NX 强制隔离或上层大脑沙箱。
-详见 [中文评估](docs/assessment.md) / [English assessment](docs/assessment.en.md)。
+详见 [中文评估](docs/assessment.md) / [English assessment](docs/assessment.en.md)
+与 [SECURITY.md](SECURITY.md)。
 
 *Toolchain check: `tools/check-toolchain.sh`. Boot details (PVH, the
 32→64 transition): [docs/boot.en.md](docs/boot.en.md). To verify the
@@ -134,8 +140,13 @@ exception handler, build once with `make FAULT_TEST=1`.*
 | [docs/conformance.en.md](docs/conformance.en.md) | Object conformance standard (English) / 物件符合性标准（英文） |
 | [docs/assessment.md](docs/assessment.md) | 安全、可靠性与性能评估（中文）/ Assessment (Chinese) |
 | [docs/assessment.en.md](docs/assessment.en.md) | Security, reliability, and performance assessment (English) / 评估（英文） |
-| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | 贡献指南 / Contributing guide |
+| [docs/README.md](docs/README.md) | 文档索引与术语对照 / Documentation index and glossary |
+| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | 贡献指南（完整版）/ Contributing guide (full) |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | 变更记录 / Changelog |
+| [SECURITY.md](SECURITY.md) | 安全策略与**当前安全缺口** / Security policy and current gaps |
+| [SUPPORT.md](SUPPORT.md) | 寻求帮助与项目边界 / Getting help and project scope |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | 贡献入口（指向 docs/）/ Contributing entry point |
+| [CITATION.cff](CITATION.cff) | 如何引用 / How to cite |
 | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | 行为准则 / Code of conduct |
 
 ---

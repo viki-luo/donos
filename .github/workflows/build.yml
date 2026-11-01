@@ -1,0 +1,70 @@
+name: Build and verify
+
+# 什么时候跑：任何推送到 main、任何 PR、可手动触发
+# When it runs: every push to main, every pull request, or manually
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # 同一分支的新推送取消旧的运行，避免排队
+  # A newer push to the same ref cancels the older run
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, riscv64]
+
+    steps:
+      - name: 检出 / Checkout
+        uses: actions/checkout@v4
+
+      - name: 安装工具链 / Install toolchain
+        run: |
+          set -eux
+          sudo apt-get update
+          # 两个架构都需要 clang/lld/llvm/make；nasm 只给 x86_64
+          # Both need clang/lld/llvm/make; nasm is only used by x86_64
+          sudo apt-get install -y clang lld llvm make nasm
+          clang --version
+          ld.lld --version
+
+      - name: 构建 / Build
+        run: |
+          set -eux
+          make ARCH=${{ matrix.arch }}
+          # 构建产物必须存在且非空
+          # The image must exist and be non-empty
+          test -s build/${{ matrix.arch }}/liteos.bin
+          llvm-size build/${{ matrix.arch }}/liteos.bin
+
+      # 防回归门禁：变量除数会把 __udivdi3 之类编译器运行时拖进链接，
+      # 裸机没有这些库。这条检查在 QEMU 之前就能失败。
+      # Regression gate: a variable divisor drags compiler-runtime symbols such
+      # as __udivdi3 into the link ticket, and bare metal carries none of them.
+      - name: 检查 64 位除法运行时符号 / Check for 64-bit division runtime symbols
+        run: |
+          set -eux
+          if llvm-nm build/${{ matrix.arch }}/liteos.bin | grep -E '__u?(div|mod)di3'; then
+            echo "variable divisor found; use a compile-time constant"
+            exit 1
+          fi
+
+      - name: 上传镜像 / Upload image
+        uses: actions/upload-artifact@v4
+        with:
+          name: liteos-${{ matrix.arch }}
+          path: build/${{ matrix.arch }}/liteos.bin
+          if-no-files-found: error
+          retention-days: 7

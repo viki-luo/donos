@@ -1,0 +1,37 @@
+# 代码所有者 / Code owners
+#
+# 这些路径的改动会自动请求对应审阅者。
+# 本文件必须位于 .github/、仓库根或 docs/ 之一。
+#
+# Paths below get automatic review requests. This file must live in .github/,
+# the repository root, or docs/.
+#
+# 注意：占位符 @OWNER 需替换为真实账号或团队，否则 GitHub 会直接报错。
+# NOTE: replace the @OWNER placeholder with a real account or team, or GitHub
+# will reject the file.
+
+# 默认：整个仓库归维护者 / Default: whole repository
+*                       @OWNER
+
+# 基座：设计律所在，改动需要最严格审查
+# The base: the design law lives here; changes need the strictest review
+/base/                  @OWNER
+/docs/design.md         @OWNER
+/docs/design.en.md      @OWNER
+/docs/conformance.md    @OWNER
+/docs/conformance.en.md @OWNER
+
+# 安全与评估结论 / Security and assessment claims
+/SECURITY.md            @OWNER
+/docs/assessment.md     @OWNER
+/docs/assessment.en.md  @OWNER
+
+# 构建与 CI / Build and CI
+/Makefile               @OWNER
+/.github/workflows/     @OWNER
+/tools/                 @OWNER
+
+# 架构层：各架构可指定不同负责人
+# Architecture layer: each architecture may have its own owner
+/arch/x86_64/           @OWNER
+/arch/riscv64/          @OWNER

@@ -13,7 +13,7 @@ liteOS is not "an operating system" but a **base**: a stateless foundation that 
 | Layer | Role | Property |
 |---|---|---|
 | **Brain** | intent, policy, intelligence | hot-pluggable, replaceable at will |
-| **Base** | motion control only | invariant, trustworthy, stateless |
+| **Base** | motion control only | invariant and stateless (**"trustworthy" is a goal, not yet guaranteed by isolation**) |
 | **Object** | the physical world | plug-and-play, driven by the base |
 
 ---
@@ -278,13 +278,21 @@ A new brain connects and reads the situation directly from the objects. This wor
 | Meaning of "seamless" | **the body is not interrupted** | **the mind is not interrupted** |
 | Guaranteed by | the base (recognize and take control) | the base (keep running) |
 | Where state lives | in the object itself | in the objects (the brain reads it) |
-| Consequence of failure | physical accident | becomes dumb, not dangerous |
+| Consequence of failure | physical accident | **goal:** becomes dumb, not dangerous (no privilege isolation yet, see below) |
 | Technical difficulty | physical continuity | cognitive continuity (shared language) |
 | Defines correctness? | no | yes |
 | What is replaced | the limbs of the world | the values of the world |
 
 > **Object seamlessness is continuity of body; brain seamlessness is continuity of mind.**
 > The former rests on the autonomy of objects, the latter on objects as memory.
+
+> **Status correction (see [assessment.en.md](assessment.en.md) §4.2):**
+> "becomes dumb, not dangerous" is a **goal**, not a current fact. There is no
+> privilege isolation today — on x86_64 every page is writable and executable
+> and `CR0.WP=0`; on riscv64 the system runs in Bare mode with `satp=0`. While a
+> brain holds the same privilege as the base, a faulty brain can go dumb *and*
+> corrupt the base. That sentence becomes true only after execution isolation
+> exists.
 
 ---
 

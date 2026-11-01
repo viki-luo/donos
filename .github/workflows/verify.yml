@@ -1,0 +1,89 @@
+name: QEMU self-test and measurement
+
+# 在 QEMU 中真正启动内核，并对串口输出做断言。
+# Boot the kernel under QEMU and assert on its serial output.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-qemu
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, riscv64]
+
+    steps:
+      - name: 检出 / Checkout
+        uses: actions/checkout@v4
+
+      - name: 安装工具链 / Install toolchain
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y clang lld llvm make nasm qemu-system-x86 qemu-system-misc
+          qemu-system-x86_64 --version
+          qemu-system-riscv64 --version
+
+      - name: 构建 / Build
+        run: make ARCH=${{ matrix.arch }}
+
+      - name: 启动并采集串口 / Boot and capture serial
+        run: |
+          set -eux
+          case "${{ matrix.arch }}" in
+            x86_64)
+              timeout 30 qemu-system-x86_64 \
+                -kernel build/x86_64/liteos.bin \
+                -m 256M \
+                -serial file:serial.log \
+                -display none -no-reboot -no-shutdown || true
+              ;;
+            riscv64)
+              timeout 30 qemu-system-riscv64 \
+                -machine virt -bios default -m 256M \
+                -kernel build/riscv64/liteos.bin \
+                -device e1000 \
+                -serial file:serial.log \
+                -display none -no-reboot || true
+              ;;
+          esac
+          tr -d "\r" < serial.log > serial.txt
+          cat serial.txt
+
+      - name: 断言自检与测量 / Assert self-test and measurements
+        run: |
+          set -eux
+          # 1. 语义自检零失败
+          grep -q "^  failures = 0$" serial.txt
+          # 2. 基准压力测试零失败
+          grep -q "bench failures = 0" serial.txt
+          # 3. 每一项测量都必须出现
+          for p in "base_apply accepted" "base_apply rejected" \
+                   "object_resolve, chain of 1" "object_resolve, chain of 8" \
+                   "full run over" "one 100 Hz tick period" \
+                   "worst run share of a tick" "capacity =" "churn cycles ="; do
+            grep -q "$p" serial.txt
+          done
+          # 4. 保护状态必须自报
+          grep -q "protection: what the MMU actually enforces" serial.txt
+
+      - name: 保存串口日志 / Save serial log
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: serial-${{ matrix.arch }}
+          path: serial.txt
+          if-no-files-found: warn
+          retention-days: 7

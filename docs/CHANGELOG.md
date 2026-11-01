@@ -12,6 +12,24 @@
 
 ### Added / 新增
 
+- **GitHub 社区标准文件**：`SECURITY.md`（安全策略与**当前已实测的安全缺口**）、
+  `SUPPORT.md`（求助渠道与项目边界）、根目录 `CONTRIBUTING.md`（指向完整指南）、
+  `CITATION.cff`、`docs/README.md`（文档索引与术语对照）、`CODEOWNERS`、
+  `.editorconfig`、Issue 模板 `config.yml`（禁用空白 Issue，指向安全与讨论）
+  / **GitHub community standards**: `SECURITY.md` (policy plus **measured current
+  gaps**), `SUPPORT.md` (help channels and project scope), root `CONTRIBUTING.md`
+  (pointer), `CITATION.cff`, `docs/README.md` (index and glossary), `CODEOWNERS`,
+  `.editorconfig`, and an issue-template `config.yml`
+- **CI**：`.github/workflows/build.yml` 在两架构上构建并禁止 64 位除法运行时符号；
+  `.github/workflows/verify.yml` 在 QEMU 中启动内核，断言自检零失败、压力测试零失败、
+  每一项测量都出现、保护状态被自报；`.github/dependabot.yml` 只维护 Actions
+  / **CI**: `build.yml` builds both architectures and forbids 64-bit division
+  runtime symbols; `verify.yml` boots under QEMU and asserts zero self-test
+  failures, zero stress failures, presence of every measurement, and a printed
+  protection report; `dependabot.yml` maintains Actions only
+- **`make check`**：本地与 CI 运行同一套门禁，断言跨架构一致性而非绝对性能数字
+  / **`make check`**: the same gate locally and in CI, asserting cross-architecture
+  consistency rather than absolute performance numbers
 - 完整设计文档（中英双语）/ Full design document (bilingual)
 - 贡献指南与行为准则 / Contributing guide and code of conduct
 - Issue 与 PR 模板 / Issue and PR templates

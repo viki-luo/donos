@@ -1,0 +1,45 @@
+cff-version: 1.2.0
+message: "引用本软件时请使用以下信息 / If you use this software, please cite it as below."
+title: "liteOS: a stateless motion-control base"
+abstract: >-
+  liteOS is not an operating system but a base: a stateless foundation that does
+  exactly one thing, motion control, and can be ridden by any hot-pluggable upper
+  brain. Everything is treated as a motion object; the base is the only
+  non-object. It runs on x86_64 and riscv64 and is verified under QEMU on both.
+type: software
+license: MIT
+
+authors:
+  - name: "liteOS contributors"
+
+# 版本号遵循语义化版本，此处与 CHANGELOG 的 Unreleased 对应。
+# Versioning follows Semantic Versioning; this tracks CHANGELOG "Unreleased".
+version: "0.1.0"
+date-released: "2025-01-01"
+
+repository-code: "https://github.com/OWNER/REPO"
+url: "https://github.com/OWNER/REPO"
+
+keywords:
+  - bare-metal
+  - microkernel
+  - motion-control
+  - stateless
+  - hot-plug
+  - x86_64
+  - riscv64
+
+# 尚未发布归档版本时，请引用具体的提交号。
+# Until a release is archived, cite a specific commit.
+identifiers:
+  - type: other
+    value: "main branch (unreleased prototype)"
+    description: "Cite the exact commit you built; 0.x interfaces are unstable."
+
+preferred-citation:
+  type: software
+  title: "liteOS: a stateless motion-control base"
+  year: 2025
+  license: MIT
+  authors:
+    - name: "liteOS contributors"

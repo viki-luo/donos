@@ -84,7 +84,7 @@ S_OBJS   := $(patsubst %.S,$(BUILD)/%.o,$(S_SRCS))
 OBJS := $(ASM_OBJS) $(S_OBJS) $(C_OBJS)
 
 # ---------------------------------------------------------------------
-.PHONY: all run debug clean size dirs
+.PHONY: all run debug clean size dirs check
 
 all: $(BUILD)/$(OUT)
 
@@ -115,6 +115,39 @@ debug: $(BUILD)/$(OUT)
 
 size: $(BUILD)/$(OUT)
 	llvm-size $<
+
+# ---------------------------------------------------------------------
+# make check —— 本地跑与 CI 相同的门禁
+#
+# 存在的理由：如果本地和 CI 跑的不是同一件事，CI 就会变成意外而不是保障。
+# 这里检查的是「跨架构一致性」与「可链接性」，不是绝对性能数字 ——
+# 后者依赖宿主，写进门禁会把偶发波动变成假失败。
+#
+# make check —— the same gate CI runs
+#
+# Why it exists: if local and CI run different things, CI becomes a surprise
+# instead of a guarantee. It asserts cross-architecture consistency and
+# linkability, never absolute performance — those depend on the host, and
+# asserting them would turn jitter into false failures.
+# ---------------------------------------------------------------------
+check:
+	@set -e; \
+	echo "=== 构建两个架构 / building both architectures ==="; \
+	$(MAKE) ARCH=x86_64 >/dev/null; \
+	$(MAKE) ARCH=riscv64 >/dev/null; \
+	echo "=== 运行测量与压力测试 / running measurements ==="; \
+	tools/bench.sh >/dev/null 2>&1 || true; \
+	for arch in x86_64 riscv64; do \
+		log=build/bench-$$arch.log; \
+		test -s $$log || { echo "缺少日志 $$log"; exit 1; }; \
+		grep -q 'failures = 0' $$log || { echo "$$arch 自检失败"; exit 1; }; \
+		grep -q 'bench failures = 0' $$log || { echo "$$arch 压力测试失败"; exit 1; }; \
+		grep -q 'protection: what the MMU actually enforces' $$log || { echo "$$arch 未自报保护状态"; exit 1; }; \
+		llvm-nm build/$$arch/liteos.bin 2>/dev/null | grep -Eq '__u?(div|mod)di3' \
+			&& { echo "$$arch 出现变量除数运行时符号"; exit 1; } || true; \
+		echo "  ok   $$arch"; \
+	done; \
+	echo "=== 全部通过 / all checks passed ==="
 
 clean:
 	rm -rf build
