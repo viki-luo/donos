@@ -23,13 +23,17 @@ Closes #
 - [ ] 未引入「停止」等第二原语 / No second primitive such as "stop" was introduced
 - [ ] 静止/运动的判定没有进入基座 / Stillness/motion decisions did not enter the base
 - [ ] 其他信息仍与大脑直连 / Other information still connects directly to the brain
+- [ ] 未引入「大脑槽」或任何特权接线 / No "brain slot" or privileged wire was introduced
+- [ ] 运动事件仍无载荷、无模式字段 / Motion events still carry no payload or mode field
 
 ## 测试 / Testing
 
 <!-- 如何验证 / How was this verified -->
 
-- [ ] 本地构建通过 / Local build passes
-- [ ] QEMU 启动验证 / Verified under QEMU
+- [ ] `make check` 通过（两架构构建 + 自检 + 测量）
+  / `make check` passes (both architectures, self-test, measurements)
+- [ ] 新增性能结论附有复现命令 / New performance claims ship with a reproduction command
+- [ ] 未引入变量除数（无 `__udivdi3`）/ No variable divisor introduced (no `__udivdi3`)
 - [ ] 真板验证 / Verified on hardware
 
 ## 文档 / Documentation
