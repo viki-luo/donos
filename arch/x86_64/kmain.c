@@ -13,6 +13,7 @@
  */
 #include "arch.h"
 #include "base.h"
+#include "bench.h"
 #include "bus.h"
 #include "object.h"
 #include "verify.h"
@@ -57,7 +58,15 @@ void kernel_main(u32 magic, u32 info)
         /* ---- 3. 总线发现：接线由此产生 ---- */
         pci_discover();
 
-        /* ---- 4. 验证 ---- */
+        /*
+         * ---- 4. 保护状态自报 ----
+         *
+         * 「有分页」和「分页提供保护」是两件事。让机器自己把位打出来。
+         */
+        arch_puts("\n--- protection: what the MMU actually enforces ---\n");
+        arch_report_protection();
+
+        /* ---- 5. 验证 ---- */
         base_verify();
 
         /*
@@ -74,7 +83,15 @@ void kernel_main(u32 magic, u32 info)
 #endif
 
         /*
-         * ---- 5. 运行：PIT 节拍驱动执行层 ----
+         * ---- 6. 测量 ----
+         *
+         * 全部在目标机上实测：原语代价、参照链代价、最坏节拍占用、
+         * 以及压力下的行为（表满、反复插拔、伪造句柄）。
+         */
+        bench_run();
+
+        /*
+         * ---- 7. 运行：PIT 节拍驱动执行层 ----
          *
          * 中断处理只累加节拍；object_run 在这里的主循环中调用，
          * 不在中断上下文里跑物件的运动环，中断保持短小、不重入。
@@ -135,6 +152,9 @@ void kernel_main(u32 magic, u32 info)
                                 arch_putdec((u64)st.position[0]);
                         }
                         arch_puts("  (still relative to arm)\n");
+                        if (object_step_count(arm) != now - start)
+                                arch_puts("  note: one step may be missed at a tick boundary;\n"
+                                          "        a late run steps once and does not catch up (decision 16)\n");
                         arch_puts("\n[live] objects keep moving; the base stays idle\n");
                         reported = true;
                 }

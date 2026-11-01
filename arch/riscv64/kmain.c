@@ -10,6 +10,7 @@
  */
 #include "arch.h"
 #include "base.h"
+#include "bench.h"
 #include "bus.h"
 #include "object.h"
 #include "verify.h"
@@ -32,7 +33,33 @@ void kernel_main(u64 hartid, u64 dtb)
         /* 总线发现：与 x86_64 共用 drivers/pci.c，配置空间走 ECAM */
         pci_discover();
 
+        /* 保护状态自报：satp 是不是 0，决定「有没有保护」这件事 */
+        arch_puts("\n--- protection: what the MMU actually enforces ---\n");
+        arch_report_protection();
+
         base_verify();
+
+        /*
+         * 定时器必须在测量之前启动：bench 的「一个节拍值多少个计数」
+         * 靠等待真实节拍来测，节拍没起来就会永远等下去。
+         */
+        arch_timer_init(hartid);
+        arch_irq_enable();
+
+        /* 测量：原语代价、参照链代价、最坏节拍占用、压力行为 */
+        bench_run();
+
+        /*
+         * 重新装订定时器，丢弃基准期间的积压。
+         *
+         * 一次性定时器按「计划时刻」累加 next_cmp：基准忙着算不回到主循环时，
+         * 多个截止时刻已经过期，中断会背靠背触发，节拍一次跳好几位，
+         * 而主循环只推进了一次 —— 于是节拍数多于步数。
+         * x86_64 的 PIT 是周期性的，没有这个问题。
+         * 重新装订让第一个真实节拍从现在起算，两边再对齐。
+         */
+        arch_timer_init(hartid);
+        arch_irq_enable();
 
         arch_puts("\n--- live: timer interrupts drive the execution layer ---\n");
 
@@ -61,9 +88,6 @@ void kernel_main(u64 hartid, u64 dtb)
          * 与 x86_64 同一套语义：中断只累加节拍，推进执行层留给主循环。
          * 区别是这里不必轮询 time CSR —— 主循环在 wfi 里等中断。
          */
-        arch_timer_init(hartid);
-        arch_irq_enable();
-
         u64 start = arch_ticks();
         u64 last = start;
 
@@ -108,6 +132,9 @@ void kernel_main(u64 hartid, u64 dtb)
                                 arch_putdec((u64)st.position[0]);
                         }
                         arch_puts("  (still relative to arm)\n");
+                        if (object_step_count(arm) != ticks - start)
+                                arch_puts("  note: one step may be missed at a tick boundary;\n"
+                                          "        a late run steps once and does not catch up (decision 16)\n");
                         arch_puts("\n[live] objects keep moving; the base stays idle\n");
                         reported = true;
                 }

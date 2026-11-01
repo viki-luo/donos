@@ -192,6 +192,17 @@ static void verify_unified(void)
         /* 同一条线上，既可以是大脑（下令者），也可以是物件（被驱动者） */
         arch_puts("  note: the same wire is both a brain and a drivable object;\n");
         arch_puts("        'brain' is a role, not a type in the base\n");
+
+        /*
+         * 归还本节占用的接线。
+         *
+         * brain1 已被换下（上面 unplug 过），但 hand、foot 与继任的 brain2
+         * 仍然插着。自检不是展示品：如果它留下物件，后面测到的「容量」
+         * 就不是系统真实的容量，而是被自检吃掉一部分的容量。
+         */
+        object_unplug(brain2);
+        object_unplug(hand);
+        object_unplug(foot);
 }
 
 /* ------------------------------------------------------------------ */

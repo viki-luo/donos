@@ -70,3 +70,37 @@ void arch_puthex64(u64 v)
         arch_puthex32((u32)(v >> 32));
         arch_puthex32((u32)(v & 0xFFFFFFFFu));
 }
+
+/* 测量用周期计数：time CSR 的计数（10 MHz） */
+u64 arch_cycles(void)
+{
+        return arch_time();
+}
+
+/*
+ * 保护状态的自我报告。
+ *
+ * satp 编码：MODE 在最高位。RV64 下 MODE = 0 为 Bare（不做翻译），
+ * 8 为 Sv39，9 为 Sv48，10 为 Sv57。这里只需要看它是不是 0。
+ */
+void arch_report_protection(void)
+{
+        u64 satp = 0;
+
+        __asm__ volatile("csrr %0, satp" : "=r"(satp));
+
+        arch_puts("  satp = 0x");
+        arch_puthex64(satp);
+        arch_puts("  (MODE=");
+        arch_putdec(satp >> 60);
+        arch_puts(" ");
+
+        if (satp == 0)
+                arch_puts("Bare: no translation, no permission bits");
+        else
+                arch_puts("translation active");
+
+        arch_puts(")\n");
+        arch_puts("  => all memory is RWX to S-mode; there is no user mode here,\n");
+        arch_puts("     so an upper brain runs with the same privilege as the base.\n");
+}

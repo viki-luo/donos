@@ -103,6 +103,19 @@ test code.
 `tools/check-toolchain.sh`。引导细节（PVH、32→64 位切换）见
 [docs/boot.md](docs/boot.md)。
 
+运行两种架构的安全、可靠性与性能测量 / Run the security, reliability,
+and performance measurements on both architectures:
+
+```sh
+make ARCH=x86_64
+make ARCH=riscv64
+tools/bench.sh
+```
+
+评估结论必须同时阅读性能数字与安全限制：当前最坏推进约占 100 Hz
+节拍的 1% 至 2%，但尚无用户态、W^X、NX 强制隔离或上层大脑沙箱。
+详见 [中文评估](docs/assessment.md) / [English assessment](docs/assessment.en.md)。
+
 *Toolchain check: `tools/check-toolchain.sh`. Boot details (PVH, the
 32→64 transition): [docs/boot.en.md](docs/boot.en.md). To verify the
 exception handler, build once with `make FAULT_TEST=1`.*
@@ -119,6 +132,8 @@ exception handler, build once with `make FAULT_TEST=1`.*
 | [docs/boot.en.md](docs/boot.en.md) | Boot path (English) / 引导路径（英文） |
 | [docs/conformance.md](docs/conformance.md) | 物件符合性标准（中文）/ Object conformance standard (Chinese) |
 | [docs/conformance.en.md](docs/conformance.en.md) | Object conformance standard (English) / 物件符合性标准（英文） |
+| [docs/assessment.md](docs/assessment.md) | 安全、可靠性与性能评估（中文）/ Assessment (Chinese) |
+| [docs/assessment.en.md](docs/assessment.en.md) | Security, reliability, and performance assessment (English) / 评估（英文） |
 | [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | 贡献指南 / Contributing guide |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | 变更记录 / Changelog |
 | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | 行为准则 / Code of conduct |
@@ -137,6 +152,8 @@ exception handler, build once with `make FAULT_TEST=1`.*
 - [ ] 中断驱动的热插拔（ACPI GPE）/ Interrupt-driven hot-plug (ACPI GPE)
 - [ ] 接线表规模与更新语义 / Wiring table scale and update semantics
 - [x] 第二个处理器架构：riscv64（`make ARCH=riscv64`，QEMU virt + OpenSBI），`base/` 未改一行 / A second processor architecture: riscv64, with `base/` unchanged
+- [x] 双架构安全、可靠性与性能评估（`tools/bench.sh`，中英文报告）/ Dual-architecture security, reliability, and performance assessment
+- [ ] 内存与特权隔离（x86_64 W^X/NX，riscv64 Sv39，上层大脑沙箱）/ Memory and privilege isolation
 - [ ] 上层大脑（大脑热拔插）/ The upper brain (brain hot-swap)
 
 ---

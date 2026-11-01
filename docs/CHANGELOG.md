@@ -136,15 +136,34 @@
 - **riscv64 定时器中断**：新增 `arch/riscv64/trap.c` 与 `traps.S`（`stvec` 直接模式，
   保存全部寄存器后调用 `trap_dispatch`）。定时器经 SBI TIME 扩展（EID 0x54494D45）
   编程 —— OpenSBI 用 PMP 把 CLINT（0x02000000）设为 S 态无访问权限，直读写分别得到
-  scause 5 与 scause 7，实测 pmpcfg0 确认。主循环 `wfi` 等中断，节拍与步数一致
-  （关中断读节拍以避免丢唤醒竞态）
+  scause 5 与 scause 7，实测 pmpcfg0 确认。主循环 `wfi` 等中断；迟到运行按
+  设计决定 16 只推进一次、不补跑，因此节拍与步数可能相差一小步，串口会同时
+  打印二者并说明原因
   / **riscv64 timer interrupts**: new `arch/riscv64/trap.c` and `traps.S` (`stvec`
   in direct mode; all registers are saved before calling `trap_dispatch`). The timer
   is programmed through the SBI TIME extension (EID 0x54494D45) — OpenSBI marks the
   CLINT (0x02000000) as S-mode no-access through PMP, so a direct read or write
   raises scause 5 or scause 7 respectively, confirmed by reading pmpcfg0. The main
-  loop waits in `wfi`; ticks and steps now agree, with interrupts disabled around
-  the tick read to avoid a lost-wakeup race
+  loop waits in `wfi`; under decision 16 a late run steps once rather than catching
+  up, so ticks and steps may differ slightly and both are printed
+
+- **安全、可靠性与性能评估**：新增目标内核基准与压力测试，覆盖合法/拒绝路径、
+  1 层与 8 层参照链、全部可用槽位的最坏推进、表满故障关闭、伪造句柄拒绝和
+  20,000 次插拔循环；新增 `tools/bench.sh` 与中英文评估报告。QEMU 实测最坏推进
+  约占一个 100 Hz 节拍的 1% 至 2%
+  / **Security, reliability, and performance assessment**: new in-kernel benchmarks
+  and stress tests cover accepted/rejected paths, one- and eight-object frame chains,
+  a worst pass over every available slot, fail-closed capacity exhaustion, forged
+  handles, and 20,000 plug/unplug cycles. `tools/bench.sh` and bilingual assessment
+  reports reproduce the results; the measured worst pass consumes about 1% to 2% of
+  a 100 Hz tick under QEMU
+- **保护状态自报**：x86_64 打印 CR0/CR4/CR3 与页目录权限；riscv64 打印 satp。
+  当前证据明确显示 x86_64 为可写可执行恒等映射且 `CR0.WP=0`，riscv64 为 Bare
+  模式，因此尚无生产级内存或上层大脑隔离
+  / **Protection-state self-reporting**: x86_64 prints CR0/CR4/CR3 and page-directory
+  permissions, while riscv64 prints satp. The evidence shows writable/executable
+  identity mappings with `CR0.WP=0` on x86_64 and Bare mode on riscv64, so production
+  memory isolation and upper-brain sandboxing are not yet present
 
 ### Changed / 变更
 
@@ -177,6 +196,12 @@
 
 ### Fixed / 修复
 
+- **统一模型自检遗留三个物件**：`brain2`、`hand`、`foot` 在测试结束后未归还，
+  会静默减少后续可用容量。现自检结束时全部拔出，基准入口容量只反映真实 PCI
+  设备占用
+  / **The unified-model self-test leaked three objects**: `brain2`, `hand`, and
+  `foot` remained plugged after the test, silently reducing later capacity. They are
+  now released, so benchmark entry capacity reflects only real PCI devices
 - **接线句柄复用会让死句柄复活**。此前 `wire_t` 就是槽位下标，旧大脑
   离开后新物件立刻复用同一槽位，于是「已离开的句柄」重新变得有效，
   旧大脑会对着陌生物件下指令。在热插拔系统里这是事故级缺陷。
