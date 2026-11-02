@@ -48,10 +48,10 @@ written response and, after a fix, credit in the CHANGELOG unless you ask to sta
 Security status: this is a prototype, not a secure product.
 
 以下不是"待办事项"，而是**当前已实测确认**的事实。
-它们记录在 [docs/assessment.md](assessment.md) 中，并可由内核自己在串口输出复现。
+它们记录在 [docs/assessment.md](docs/assessment.md) 中，并可由内核自己在串口输出复现。
 
 *The following are not TODOs but **measured facts**, recorded in
-[docs/assessment.md](assessment.en.md) and reproducible from the kernel's own
+[docs/assessment.en.md](docs/assessment.en.md) and reproducible from the kernel's own
 serial output.*
 
 ### x86_64

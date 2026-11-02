@@ -71,6 +71,10 @@ static wire_slot_t *slot_of(wire_t w)
 {
         u32 idx = WIRE_INDEX(w);
 
+        /* 高 16 位必须是 0：否则是同一句柄的非规范别名 */
+        if ((w & ~WIRE_CANONICAL_MASK) != 0)
+                return 0;
+
         if (idx == 0 || idx > WIRE_MAX)
                 return 0;
 

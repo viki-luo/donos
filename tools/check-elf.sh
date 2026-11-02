@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # 验证 clang 能否生成真正的裸机 ELF
 set -e
-export PATH=/usr/bin:/bin:/ucrt64/bin:$PATH
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$ROOT"
+if [ -d /ucrt64/bin ]; then export PATH=/usr/bin:/bin:/ucrt64/bin:$PATH; fi
 
-WORK=/c/Users/Administrator/Desktop/os/build/smoke
+WORK="$ROOT/build/smoke"
 mkdir -p "$WORK"
 
 printf 'int f(void) { return 42; }\n' > "$WORK/t.c"

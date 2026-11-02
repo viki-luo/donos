@@ -424,23 +424,24 @@ static void bench_stress(void)
               base_apply(&to_dead) == MOTION_E_NO_WIRE);
 
         /* Forged handles of every awkward shape must be refused, not crash. */
-        wire_t forged[6];
+        wire_t forged[7];
         forged[0] = 0xFFFFFFFFFFFFFFFFULL;
         forged[1] = WIRE_NONE;
         forged[2] = 0x0000000000000001ULL;
         forged[3] = 0x00010040ULL;                       /* slot 64, gen 1 */
         forged[4] = 0x00010041ULL;                       /* slot 65, past the end */
         forged[5] = WIRE_MAKE(WIRE_GEN(fresh) + 1u, WIRE_INDEX(fresh));
+        forged[6] = fresh | 0x8000000000000000ULL;       /* high-bit alias of a live handle */
 
         bool refused = true;
-        for (u8 i = 0; i < 6u; i++) {
+        for (u8 i = 0; i < 7u; i++) {
                 motion_event_t ev = make_event(forged[i], FRAME_WORLD, 1000ULL, 1, 1);
                 if (base_apply(&ev) != MOTION_E_NO_WIRE)
                         refused = false;
                 if (base_wire_valid(forged[i]))
                         refused = false;
         }
-        check("six forged handle shapes are all refused", refused);
+        check("seven forged handle shapes are all refused", refused);
 
         /* Churn: plug and unplug many times, watching the generation counter. */
         object_unplug(fresh);

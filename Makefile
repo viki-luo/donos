@@ -19,7 +19,15 @@ TARGET_TRIPLE := $(ARCH)-unknown-none-elf
 CC        := clang
 LD        := clang
 AS        := nasm
-OBJCOPY   := llvm-objcopy
+
+# 工具名在不同宿主间不一致：MSYS2 只有 GNU binutils（nm/size），
+# Linux CI 装了 llvm 包才有 llvm-nm/llvm-size。优先 llvm-*，缺失时
+# 退回 GNU 同名工具，保证两个环境都能跑 make size 与 make check。
+# Tool names differ across hosts: MSYS2 has only GNU binutils (nm/size),
+# while Linux CI installs the llvm package (llvm-nm/llvm-size). Prefer
+# llvm-*, fall back to GNU so both environments work.
+NM   := $(shell command -v llvm-nm 2>/dev/null || command -v nm 2>/dev/null || echo nm)
+SIZE := $(shell command -v llvm-size 2>/dev/null || command -v size 2>/dev/null || echo size)
 
 # ---------------------------------------------------------------------
 # 架构相关参数。base/ 的编译选项与架构无关，只有这一段随 ARCH 变化。
@@ -114,21 +122,36 @@ debug: $(BUILD)/$(OUT)
 	$(QEMU) -kernel $< $(QEMUFLAGS) -s -S
 
 size: $(BUILD)/$(OUT)
-	llvm-size $<
+	$(SIZE) $<
 
 # ---------------------------------------------------------------------
 # make check —— 本地跑与 CI 相同的门禁
 #
 # 存在的理由：如果本地和 CI 跑的不是同一件事，CI 就会变成意外而不是保障。
-# 这里检查的是「跨架构一致性」与「可链接性」，不是绝对性能数字 ——
-# 后者依赖宿主，写进门禁会把偶发波动变成假失败。
+# 这里检查的是「跨架构一致性」，不是绝对性能数字 —— 后者依赖宿主，
+# 写进门禁会把偶发波动变成假失败。
+#
+# 运行时符号那条断言的是事实而不是猜测：裸机链接没有合成运行时库，
+# 所以镜像里任何 undefined 符号都会在运行时跳进空地址。早先写的
+# 「变量除数会产生 __udivdi3」在两个目标上都不成立（rv64imac 有 M
+# 扩展、x86_64 有 divq），那条检查因此从未触发过，是空跑。真正会
+# 拉进 libgcc 的是 __int128 运算缺硬件支持时（例如 rv64iac 上的
+# __multi3）以及将来的软浮点。
 #
 # make check —— the same gate CI runs
 #
 # Why it exists: if local and CI run different things, CI becomes a surprise
-# instead of a guarantee. It asserts cross-architecture consistency and
-# linkability, never absolute performance — those depend on the host, and
-# asserting them would turn jitter into false failures.
+# instead of a guarantee. It asserts cross-architecture consistency, never
+# absolute performance — those depend on the host, and asserting them would
+# turn jitter into false failures.
+#
+# The undefined-symbol assertion states a fact rather than a guess: a bare
+# link has no synthetic runtime library, so any undefined symbol left in the
+# image is a jump to address zero. The earlier rule ("a variable divisor emits
+# __udivdi3") is false on both targets — rv64imac has the M extension and
+# x86_64 has divq — so it never fired and had silently been a no-op.
+# What actually drags libgcc in is __int128 arithmetic without hardware
+# support (e.g. __multi3 on rv64iac), and soft float later on.
 # ---------------------------------------------------------------------
 check:
 	@set -e; \
@@ -136,15 +159,19 @@ check:
 	$(MAKE) ARCH=x86_64 >/dev/null; \
 	$(MAKE) ARCH=riscv64 >/dev/null; \
 	echo "=== 运行测量与压力测试 / running measurements ==="; \
-	tools/bench.sh >/dev/null 2>&1 || true; \
+	rm -f build/bench-x86_64.log build/bench-riscv64.log; \
+	tools/bench.sh >/dev/null 2>&1; \
 	for arch in x86_64 riscv64; do \
 		log=build/bench-$$arch.log; \
 		test -s $$log || { echo "缺少日志 $$log"; exit 1; }; \
 		grep -q 'failures = 0' $$log || { echo "$$arch 自检失败"; exit 1; }; \
 		grep -q 'bench failures = 0' $$log || { echo "$$arch 压力测试失败"; exit 1; }; \
 		grep -q 'protection: what the MMU actually enforces' $$log || { echo "$$arch 未自报保护状态"; exit 1; }; \
-		llvm-nm build/$$arch/liteos.bin 2>/dev/null | grep -Eq '__u?(div|mod)di3' \
-			&& { echo "$$arch 出现变量除数运行时符号"; exit 1; } || true; \
+		if logs=$$($(NM) build/$$arch/liteos.bin 2>/dev/null | grep ' U ' | awk '{print $$2}'); \
+		   [ -n "$$logs" ]; then \
+			echo "$$arch 仍有未定义的运行时符号（裸机没有库可链接）:"; \
+			echo "$$logs"; exit 1; \
+		fi; \
 		echo "  ok   $$arch"; \
 	done; \
 	echo "=== 全部通过 / all checks passed ==="

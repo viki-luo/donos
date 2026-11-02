@@ -28,17 +28,25 @@ liteOS 是一个围绕单一理念构建的项目：**一切皆运动，基座�
 
 ### 当前状态 / Current status
 
-项目处于**设计阶段**，构建系统尚未可用。
-*The project is in **design stage**; the build system is not yet usable.*
+项目是可运行的原型：`base/` 在 x86_64 与 riscv64 上都能构建并在 QEMU 中启动，
+自检与压力测试通过。仍在演进，接口（`base.h`）在 0.x 阶段不稳定。
+*The project is a runnable prototype: `base/` builds and boots under QEMU on both
+x86_64 and riscv64, and self-tests plus stress tests pass. Interfaces (`base.h`)
+remain unstable during 0.x.*
 
-### 计划中的工具链 / Planned toolchain
+### 工具链 / Toolchain
 
 | 组件 / Component | 用途 / Purpose |
 |---|---|
-| C11 编译器 / C11 compiler | `gcc` 或 `clang` |
-| `nasm` | x86 引导代码 / x86 boot code |
-| `qemu-system-*` | 模拟运行 / Emulation |
+| `clang` + `ld.lld` | 交叉编译与链接到裸机 ELF / cross-compile and link to bare-metal ELF |
+| `llvm-objcopy` `llvm-nm` `llvm-size` | 构建产物检查 / artifact inspection |
+| `nasm` | x86_64 引导代码 / x86_64 boot code |
+| `qemu-system-x86_64` `qemu-system-riscv64` | 模拟运行 / Emulation |
 | GNU Make | 构建 / Build |
+
+先跑 `tools/check-toolchain.sh` 确认环境，再用 `make check` 跑完整门禁。
+*Run `tools/check-toolchain.sh` to confirm the environment, then `make check` for
+the full gate.*
 
 ---
 
@@ -98,7 +106,7 @@ fix(brain): correct frame resolution on attach
    - `fix/<short-description>`
    - `docs/<short-description>`
 2. 提交前确保 / *Before submitting*：
-   - 通过编译（构建可用后）/ *Build passes (once available)*
+   - `make check` 通过（两架构构建 + 自检 + 测量）/ *`make check` passes (both architectures, self-test, measurements)*
    - 未违反设计律 / *No design law violated*
    - 文档已同步更新（中英双语）/ *Docs updated (bilingual)*
 3. 填写 PR 模板 / *Fill in the PR template*
@@ -127,5 +135,5 @@ fix(brain): correct frame resolution on attach
 
 ## 行为准则 / Code of conduct
 
-参与本项目即表示同意遵守 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。
-*By participating, you agree to abide by [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).*
+参与本项目即表示同意遵守 [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md)。
+*By participating, you agree to abide by [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md).*

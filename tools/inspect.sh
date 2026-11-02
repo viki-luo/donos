@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # inspect.sh — 检查构建产物
 set -e
-export PATH=/usr/bin:/bin:/ucrt64/bin:$PATH
-
-cd /c/Users/Administrator/Desktop/os
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$ROOT"
+if [ -d /ucrt64/bin ]; then export PATH=/usr/bin:/bin:/ucrt64/bin:$PATH; fi
 
 BIN=build/x86_64/liteos.bin
 

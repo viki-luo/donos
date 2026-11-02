@@ -10,6 +10,29 @@
 
 ## [Unreleased] / 未发布
 
+### Fixed / 修复
+
+- **句柄高位别名**：`WIRE_GEN` 右移后截断为 32 位，此前未校验高 16 位，
+  对任意有效句柄置位高位即可得到一个同时有效、却与原文不同的别名。
+  新增 `WIRE_CANONICAL_MASK`，`slot_of()` 拒绝非规范句柄；压力测试的
+  伪造形状由 6 种增至 7 种，覆盖「活句柄 OR 高位」这一情形
+  / **high-bit handle aliasing**: `WIRE_GEN` truncated after the shift and the
+  top 16 bits were never checked, so ORing a high bit into any live handle
+  produced a second handle that was also accepted. `WIRE_CANONICAL_MASK` now
+  makes `slot_of()` reject non-canonical handles; the stress test covers seven
+  forged shapes instead of six
+- **CI 与 `make check` 的运行时符号门禁此前是空跑**：它禁止
+  `__udivdi3`/`__umoddi3`，理由是「变量除数会产生 libcall」。实测在两个
+  目标上都不成立 —— `rv64imac` 带 M 扩展、`x86_64` 有 `divq`，变量除数都
+  编译成硬件指令，该规则从未触发。改为断言事实：裸机链接没有合成
+  运行时库，镜像中**不得存在任何 undefined 符号**（`nm --undefined-only`）
+  / **CI and `make check` division gate was a no-op**: it banned
+  `__udivdi3`/`__umoddi3` on the theory that a variable divisor emits a libcall.
+  That is false on both targets (`rv64imac` has the M extension, `x86_64` has
+  `divq`), so it never fired. Replaced by the statement that actually holds: a
+  bare link has no synthetic runtime library, so the image must carry **no
+  undefined symbols** at all
+
 ### Added / 新增
 
 - **GitHub 社区标准文件**：`SECURITY.md`（安全策略与**当前已实测的安全缺口**）、

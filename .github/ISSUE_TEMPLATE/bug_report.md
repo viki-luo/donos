@@ -26,8 +26,8 @@ assignees: ''
 
 ## 环境 / Environment
 
-- 架构 / Architecture: <!-- x86_64 / aarch64 / riscv64 -->
-- 构建目标 / Build target dictionary: <!-- make run / 真板 -->
+- 架构 / Architecture: <!-- x86_64 / riscv64 -->
+- 构建与运行命令 / Build and run command: <!-- make ARCH=... run -->
 - 提交 / Commit:
 
 ## 是否违反设计律 / Does it violate a design law?
@@ -36,7 +36,7 @@ assignees: ''
 
 - [ ] 基座无状态 / The base is stateless
 - [ ] 唯一原语 / Single primitive
-- [ ] 静止是相对的 / Stillness is relative unicorn
+- [ ] 静止是相对的 / Stillness is relative
 
 ## 附加信息 / Additional context
 

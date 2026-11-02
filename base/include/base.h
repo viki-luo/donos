@@ -49,6 +49,13 @@ typedef uint64_t wire_t;
 #define WIRE_GEN(w)         ((u32)((w) >> 16))
 #define WIRE_MAKE(gen, idx) (((wire_t)(gen) << 16) | (wire_t)(idx))
 
+/*
+ * 句柄只使用低 48 位：世代号 32 位（位 16..47）+ 槽位 16 位（位 0..15）。
+ * 高 16 位（位 48..63）必须为 0 —— WIRE_GEN 会右移后截断，若高位置位，
+ * 同一句柄会出现多个非规范别名，校验时必须拒绝它们。
+ */
+#define WIRE_CANONICAL_MASK ((wire_t)0x0000FFFFFFFFFFFFull)
+
 /* 世界坐标系：所有运动最终的参照。 */
 #define FRAME_WORLD 0
 

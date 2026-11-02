@@ -41,14 +41,19 @@ jobs:
 
       - name: 启动并采集串口 / Boot and capture serial
         run: |
-          set -eux
+          # 内核不主动退出，timeout(124) 是正常结束；其他非零视为启动失败。
+          # The kernel never exits on its own: 124 is the normal end, any other
+          # non-zero status means boot failed.
+          set -eu
+          rm -f serial.log serial.txt
+          rc=0
           case "${{ matrix.arch }}" in
             x86_64)
               timeout 30 qemu-system-x86_64 \
                 -kernel build/x86_64/liteos.bin \
                 -m 256M \
                 -serial file:serial.log \
-                -display none -no-reboot -no-shutdown || true
+                -display none -no-reboot -no-shutdown || rc=$?
               ;;
             riscv64)
               timeout 30 qemu-system-riscv64 \
@@ -56,9 +61,14 @@ jobs:
                 -kernel build/riscv64/liteos.bin \
                 -device e1000 \
                 -serial file:serial.log \
-                -display none -no-reboot || true
+                -display none -no-reboot || rc=$?
               ;;
           esac
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ]; then
+            echo "::error::QEMU exited with $rc, not a normal timeout"
+            exit 1
+          fi
+          test -s serial.log
           tr -d "\r" < serial.log > serial.txt
           cat serial.txt
 

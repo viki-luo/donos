@@ -20,7 +20,7 @@ concurrency:
 jobs:
   build:
     name: ${{ matrix.arch }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -34,9 +34,8 @@ jobs:
         run: |
           set -eux
           sudo apt-get update
-          # 两个架构都需要 clang/lld/llvm/make；nasm 只给 x86_64
-          # Both need clang/lld/llvm/make; nasm is only used by x86_64
-          sudo apt-get install -y clang lld llvm make nasm
+          sudo apt-get install -y clang lld llvm make nasm \
+            qemu-system-x86 qemu-system-misc
           clang --version
           ld.lld --version
 
@@ -44,27 +43,27 @@ jobs:
         run: |
           set -eux
           make ARCH=${{ matrix.arch }}
-          # 构建产物必须存在且非空
-          # The image must exist and be non-empty
           test -s build/${{ matrix.arch }}/liteos.bin
           llvm-size build/${{ matrix.arch }}/liteos.bin
 
-      # 防回归门禁：变量除数会把 __udivdi3 之类编译器运行时拖进链接，
-      # 裸机没有这些库。这条检查在 QEMU 之前就能失败。
-      # Regression gate: a variable divisor drags compiler-runtime symbols such
-      # as __udivdi3 into the link ticket, and bare metal carries none of them.
-      - name: 检查 64 位除法运行时符号 / Check for 64-bit division runtime symbols
+      # 防回归门禁：裸机镜像里不允许出现「需要外部链接」的编译器运行时符号。
+      # 注意不是常见的「变量除数」问题 —— 在 rv64imac（含 M 扩展）与
+      # x86_64（有 divq）上变量除数都走硬件指令，不产生 libcall；真正的风险是
+      # base/object.c 用到的 __int128 运算，以及将来可能加入的 128 位除法、
+      # 软浮点等。这条检查只认事实：目标文件里还有没有 undefined 符号。
+      # Regression gate: a bare-metal image must not carry compiler-runtime
+      # symbols that need an external link. This is not the usual "variable
+      # divisor" trap: with the M extension on rv64imac and divq on x86_64,
+      # division is a hardware instruction and never emits a libcall. The real
+      # risk is __int128 arithmetic used in base/object.c . So this
+      # gate asserts the fact instead: no undefined symbols remain.
+      #
+      - name: 检查未定义运行时符号 / Check for undefined runtime symbols
         run: |
           set -eux
-          if llvm-nm build/${{ matrix.arch }}/liteos.bin | grep -E '__u?(div|mod)di3'; then
-            echo "variable divisor found; use a compile-time constant"
+          image=build/${{ matrix.arch }}/liteos.bin
+          if llvm-nm --undefined-only "$image" | grep -v '^-'; then
+            echo "::error file=$image::undefined compiler-runtime symbol in a bare-metal image"
             exit 1
           fi
-
-      - name: 上传镜像 / Upload image
-        uses: actions/upload-artifact@v4
-        with:
-          name: liteos-${{ matrix.arch }}
-          path: build/${{ matrix.arch }}/liteos.bin
-          if-no-files-found: error
-          retention-days: 7
+          echo "no undefined symbols: $image"

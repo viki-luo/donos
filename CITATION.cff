@@ -12,10 +12,11 @@ license: MIT
 authors:
   - name: "liteOS contributors"
 
-# 版本号遵循语义化版本，此处与 CHANGELOG 的 Unreleased 对应。
-# Versioning follows Semantic Versioning; this tracks CHANGELOG "Unreleased".
-version: "0.1.0"
-date-released: "2025-01-01"
+# 版本号遵循语义化版本；本项目尚未发布归档版本（CHANGELOG 只有 Unreleased），
+# 因此不声明 version 与 date-released，避免生成虚假的发布日期。
+# Versioning follows Semantic Versioning; the project has not released an archive
+# (CHANGELOG has only "Unreleased"), so version and date-released are omitted to
+# avoid fabricating a release date.
 
 repository-code: "https://github.com/OWNER/REPO"
 url: "https://github.com/OWNER/REPO"
@@ -39,7 +40,6 @@ identifiers:
 preferred-citation:
   type: software
   title: "liteOS: a stateless motion-control base"
-  year: 2025
   license: MIT
   authors:
     - name: "liteOS contributors"

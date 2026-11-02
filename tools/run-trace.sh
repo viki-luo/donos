@@ -5,9 +5,10 @@
 # 内核如果跑飞，串口会不断输出垃圾，终端刷屏看不到有用信息。
 # 落入文件后可以只看开头几百字节。
 set -e
-export PATH=/usr/bin:/bin:/ucrt64/bin:$PATH
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$ROOT"
+if [ -d /ucrt64/bin ]; then export PATH=/usr/bin:/bin:/ucrt64/bin:$PATH; fi
 
-cd /c/Users/Administrator/Desktop/os
 BIN=build/x86_64/liteos.bin
 LOG=${1:-build/serial.log}
 
@@ -18,6 +19,8 @@ fi
 
 rm -f "$LOG"
 
+# 内核不主动退出，timeout(124) 是正常结束；其他非零视为失败。
+set +e
 timeout 5 qemu-system-x86_64 \
         -kernel "$BIN" \
         -m 256M \
@@ -25,7 +28,10 @@ timeout 5 qemu-system-x86_64 \
         -display none \
         -no-reboot \
         -no-shutdown \
-        2>&1 || true
+        >/dev/null 2>&1
+rc=$?
+set -e
+[ "$rc" -eq 0 ] || [ "$rc" -eq 124 ] || { echo "QEMU 异常退出（code=$rc）" >&2; exit 1; }
 
 echo "=== 串口日志前 400 字节（十六进制） ==="
 if [ -f "$LOG" ]; then
