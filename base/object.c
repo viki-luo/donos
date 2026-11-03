@@ -20,11 +20,12 @@ typedef struct {
         /* --- 以下全部是物件自己的状态，基座一律看不到 --- */
         motion_fixed_t motion[MOTION_DOF_MAX];
         wire_t         frame;
-        u64            duration_ns;
+        u64            duration_ns;   /* 接时的新鲜度窗口（记录用） */
         u8             dof;
         u32            event_count;
         u32            unit;          /* 物件自述的单位语义（R3） */
         u64            period_ns;     /* 物件自述的控制周期，由执行层兑现 */
+        motion_fixed_t carry[3];      /* 积分余数：不足一个最低位的零头 */
         u64            next_due_ns;   /* 下一次运动环到期时刻；0 = 尚未起步 */
         u32            step_count;
 
@@ -35,6 +36,14 @@ typedef struct {
 } object_t;
 
 static object_t objects[OBJECT_MAX];
+
+/*
+ * 物件侧的执行时钟：最近一次 object_run 的时刻。
+ *
+ * 它有两个用途：运动环排期（决定 16）与提交时的新鲜度判定（决定 10 修订）。
+ * 基座不计时，所以时间只能存在物件侧。调用者必须给出单调递增的时刻。
+ */
+static u64 exec_now_ns;
 
 /* 把一段内存清零，不依赖 libc（freestanding） */
 static void zero(void *p, u64 n)
@@ -50,6 +59,7 @@ static void zero(void *p, u64 n)
  */
 void object_init(void)
 {
+        exec_now_ns = 0;
         for (u64 i = 0; i < OBJECT_MAX; i++) {
                 objects[i].in_use = false;
                 objects[i].wire = WIRE_NONE;
@@ -59,6 +69,9 @@ void object_init(void)
                 objects[i].event_count = 0;
                 objects[i].unit = 0;
                 objects[i].period_ns = 0;
+                objects[i].carry[0] = 0;
+                objects[i].carry[1] = 0;
+                objects[i].carry[2] = 0;
                 objects[i].next_due_ns = 0;
                 objects[i].step_count = 0;
                 for (u8 k = 0; k < MOTION_DOF_MAX; k++)
@@ -87,6 +100,14 @@ static object_t *find_by_wire(wire_t w)
  */
 wire_t object_plug(u32 unit, u64 period_ns)
 {
+        /*
+         * 周期上限：积分用 64 位整数做 v * period_ns，若周期本身
+         * 超过 2^63/2^32 秒（约 68 年），任何非零速度都会溢出。
+         * 拒绝而不是截断 —— 申报一个跑不动的周期是物件侧的错。
+         */
+        if (period_ns > OBJECT_PERIOD_NS_MAX)
+                return WIRE_NONE;
+
         for (u64 i = 0; i < OBJECT_MAX; i++) {
                 if (objects[i].in_use)
                         continue;
@@ -103,6 +124,9 @@ wire_t object_plug(u32 unit, u64 period_ns)
                 objects[i].event_count = 0;
                 objects[i].unit = unit;
                 objects[i].period_ns = period_ns;
+                objects[i].carry[0] = 0;
+                objects[i].carry[1] = 0;
+                objects[i].carry[2] = 0;
                 objects[i].next_due_ns = 0;
                 objects[i].step_count = 0;
                 for (u8 k = 0; k < MOTION_DOF_MAX; k++)
@@ -133,13 +157,30 @@ void object_unplug(wire_t w)
 
 /*
  * 基座把已经校验过的事件递到这里。物件接住它，并自己负责后续 ——
- * 包括事件到期之后继续沿轨道运动。
+ * 包括接之后继续沿轨道运动。
+ *
+ * 新鲜度判定（设计决定 10 修订）在这里做，而不是在基座里：
+ * 事件只在 [issued_at_ns, issued_at_ns + duration_ns] 窗口内可被接，
+ * 判定需要一个「现在」，而基座不计时。物件层的时间源就是执行时钟。
  */
 motion_status_t object_submit(wire_t w, const motion_event_t *ev)
 {
         object_t *o = find_by_wire(w);
         if (o == 0)
                 return MOTION_E_NO_OBJECT;
+
+        if (ev->duration_ns == 0)
+                return MOTION_E_INVAL;            /* 零长度窗口永远无效 */
+
+        u64 deadline = ev->issued_at_ns + ev->duration_ns;
+        if (deadline < ev->issued_at_ns)
+                return MOTION_E_INVAL;            /* 窗口端点回绕 */
+
+        if (ev->issued_at_ns > exec_now_ns)
+                return MOTION_E_INVAL;            /* 未来事件：时间来源异常 */
+
+        if (exec_now_ns > deadline)
+                return MOTION_E_DEADLINE;         /* 过期：拒绝陈旧命令 */
 
         o->dof = ev->dof;
         o->frame = ev->frame;
@@ -255,10 +296,31 @@ bool object_state(wire_t w, object_state_t *out)
 /* 参照系解算（方案 A：物件自己解，物件间直连）                         */
 /* ------------------------------------------------------------------ */
 
-/* Q32.32 乘法：128 位中间积，避免溢出；不涉及除法，不需要编译器运行库 */
+/*
+ * 有符号 128 位「除以 2^32 并就近取整」。
+ *
+ * 负数不直接取负（那会在 INT128_MIN 上溢出），而是先取幅值再回填符号，
+ * 因此两侧取整完全对称。2^32 是编译期常量，右移不拉进编译器运行库。
+ *
+ * 为什么不直接用 >> 32：算术右移对负数是向 −∞ 取整。参照系旋转会
+ * 处理反向分量，向 −∞ 取整在该侧恒偏小，等于给旋转加了单向偏差。
+ */
+static motion_fixed_t shr_round_32(__int128 v)
+{
+        const unsigned __int128 half = (unsigned __int128)1 << 31;
+
+        if (v >= 0)
+                return (motion_fixed_t)((v + (__int128)half) >> 32);
+
+        /* |v| = -(v + 1) + 1，这种写法对 INT128_MIN 也成立 */
+        unsigned __int128 mag = (unsigned __int128)(-(v + 1)) + 1u;
+        return (motion_fixed_t)(-((__int128)((mag + half) >> 32)));
+}
+
+/* Q32.32 乘法：128 位中间积，避免溢出；不涉及除法，不需要编译器运行库。 */
 static motion_fixed_t qmul(motion_fixed_t a, motion_fixed_t b)
 {
-        return (motion_fixed_t)(((__int128)a * b) >> 32);
+        return shr_round_32((__int128)a * b);
 }
 
 /*
@@ -323,8 +385,26 @@ bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX])
 /* ------------------------------------------------------------------ */
 
 /*
- * 物件的一步运动环：把解算出的相对世界运动积分进位置。
- * 参考实现中 motion 的单位是「每个控制周期的位移」。
+ * 物件的一步运动环：把解算出的相对世界速度积分进位置。
+ *
+ * motion 是速度（设计决定 18）：一步积分「速度 × 自述周期」，
+ * 与周期长短无关地逼近同一世界速度。落后时不补跑（决定 16），
+ * 因此这里也只积分一个周期，不积实际流失的时间。
+ *
+ * 积分用「余数进位」，不是每步各自取整：
+ *
+ *     acc  = v * period_ns                     （精确，不缺位）
+ *     step = acc / 1e9      + carry[i]         （本位）
+ *     carry[i] = acc % 1e9                     （不足一位的余数留到下一步）
+ *
+ * 每步各自取整时，舍入误差恒为同号，会随步数线性累积：同样 3 m/s、
+ * 同样 9 ms，1 ms 周期与 3 ms 周期会差出 9 个最低位")，且周期越细
+ * 误差越大——那不是「精度问题」，而是速度本身被周期改写了。
+ * 余数进位把丢掉的零头存下来在下一次补上，误差只在 ±1 个最低位之间
+ * 摆动而不累积，因此两条不同周期的积分路径给出逐比特相同的结果。
+ *
+ * 只积分线分量（0..2）到位姿；角分量（3..5）可被解算与直读，
+ * 参考实现不积分姿态（那是物件自己的闭环的事）。
  * 参照链断开或成环时位置保持不动，但这一步仍算执行过。
  */
 static void object_step(object_t *o)
@@ -332,14 +412,54 @@ static void object_step(object_t *o)
         motion_fixed_t r[MOTION_DOF_MAX];
 
         if (object_resolve(o->wire, r)) {
-                for (u8 i = 0; i < 3 && i < o->dof; i++)
-                        o->state.position[i] += r[i];
+                for (u8 i = 0; i < 3 && i < o->dof; i++) {
+                        /*
+                         * 余数进位积分（整数域，不碰 128 位除法）：
+                         *
+                         *   num  = v * period_ns + carry   （单位：LSB·ns）
+                         *   step = num / 1e9               （本步整数位）
+                         *   carry = num % 1e9              （留到下一步）
+                         *
+                         * 1e9 是编译期常量，除法被折成立即数与乘法；
+                         * 128 位一般除法会拉进 __divti3，必须避开。
+                         *
+                         * 只能用 64 位中间量，因此要求
+                         *     |v| * period_ns < 2^63 - 1e9
+                         * 对 period_ns ≤ 10 ms 意味着 |v| ≤ 9.2e11 m/s，
+                         * 远超任何运动系统的速度上限（见 object_plug 校验）。
+                         *
+                         * C 的 / 与 % 向零截断：负速度得到负步长负余数，
+                         * 进位方向与运动方向一致。
+                         */
+                        /*
+                         * 余数进位积分（只在 64 位整数域做除法）：
+                         *
+                         *   num  = v * period_ns + carry   （单位：LSB·ns）
+                         *   step = num / 1e9               （本步整数位）
+                         *   carry = num % 1e9              （留到下一步）
+                         *
+                         * carry 恒在 (−1e9, 1e9) 内，因此只要
+                         * |v| * period_ns < 2^63 - 1e9，num 就装得进 int64，
+                         * 除法不会退化成 128 位（128 位一般除法会拉进
+                         * __divti3，裸机没有库可以链接）。object_plug()
+                         * 校验 period_ns 上限，速度上限由调用者遵守。
+                         *
+                         * C 的 / 与 % 向零截断：负速度得到负步长负余数，
+                         * 进位方向与运动方向一致。
+                         */
+                        motion_fixed_t num = r[i] * (motion_fixed_t)o->period_ns
+                                           + o->carry[i];
+
+                        o->state.position[i] += num / 1000000000LL;
+                        o->carry[i] = num % 1000000000LL;
+                }
         }
         o->step_count++;
 }
 
 u32 object_run(u64 now_ns)
 {
+        exec_now_ns = now_ns;   /* 同时是提交新鲜度的判定时钟 */
         u32 stepped = 0;
 
         for (u64 i = 0; i < OBJECT_MAX; i++) {

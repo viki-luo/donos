@@ -21,7 +21,7 @@ It is not necessarily a bad object; accepting it would require a second primitiv
 | # | Requirement | Meaning | How to check | Verification |
 |---|---|---|---|---|
 | **R1** | Single control surface | Driven only by `motion_event_t`; no second kind of command exists | With all motion set to 0, the object becomes relatively still without errors or other commands | **tested** |
-| **R2** | Self-sustaining | Keeps moving after an event expires; the base does not keep feeding it | Stop sending after `duration_ns` expires; the object is still moving (pick-and-place model) | **tested** |
+| **R2** | Self-sustaining | Keeps moving by itself once an event is accepted; the base does not keep feeding it | Stop sending after the freshness window closes; the object is still moving (pick-and-place self-sustaining survives acceptance) | **tested** |
 | **R3** | Self-declared wiring properties | Declares `unit` and `period_ns` on arrival | The brain can read the declared values directly through `object_declared()`; they are gone after departure | **tested** |
 | **R4** | Fixed-point boundary | No floating point crosses the boundary | `motion[]` accepts only Q32.32; floats are allowed inside, not at the boundary | type-enforced |
 | **R5** | Referenceable | Can serve as another object's `frame`, and can resolve the `frame` it receives | Resolves motion relative to the world along the frame chain; cycles and broken chains must be rejected | **tested** |

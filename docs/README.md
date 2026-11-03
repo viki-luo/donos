@@ -53,5 +53,6 @@ mandatory; see [docs/CONTRIBUTING.md](CONTRIBUTING.md).*
 | 大脑 | brain | 恰好正在驱动基座的普通接线，可热插拔 |
 | 接线 | wire | 端口到物件的通道；基座持有的唯一东西 |
 | 参照系 | frame | 另一条接线；`motion` 相对它 |
-| 拾取器模型 | pick-and-place | `duration_ns` 是事件有效期，到期后物件继续运动 |
+| 新鲜度窗口 | freshness window | `duration_ns` 是命令可被接受的时间窗口；接受之后物件继续运动 |
+| 余数进位 | remainder carry | 积分时把不足一个最低位的零头留给下一步，避免误差单向累积 |
 | 施加运动 | apply_motion | 唯一原语 |

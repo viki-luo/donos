@@ -155,7 +155,14 @@ static motion_event_t make_event(wire_t wire, wire_t frame, u64 duration,
         motion_event_t ev;
         ev.wire = wire;
         ev.frame = frame;
-        ev.duration_ns = duration;
+        /*
+         * 测量的是机制代价，不是新鲜度语义：发出时刻取 0、窗口取最大值，
+         * 让每个事件无论合成时钟走到哪里都保持新鲜。
+         * duration 参数仅保留以兼容调用点。
+         */
+        (void)duration;
+        ev.issued_at_ns = 0;
+        ev.duration_ns = UINT64_MAX;
         ev.dof = dof;
         for (u8 i = 0; i < MOTION_DOF_MAX; i++)
                 ev.motion[i] = 0;

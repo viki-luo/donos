@@ -20,11 +20,17 @@
 #include "types.h"
 
 /*
- * 定点数约定
+ * 定点数与量纲（设计决定 18，冻结）
  * -----------------
  * 基座不碰浮点。所有运动量以定点表示：
  *   高 32 位为整数部分，低 32 位为小数部分（Q32.32）。
- * 单位由接线在接入时声明（度、毫米、弧度…），基座只搬运数值。
+ *
+ * motion 的量纲在通道上冻结，不随物件变化：
+ *   motion[0..2]  线速度，m/s
+ *   motion[3..5]  角速度，rad/s
+ * 物件按自己申报的 period_ns 把速度积分到位姿——同一事件在不同周期的
+ * 物件上产生相同的世界速度。设备原生单位（度、编码器 tick、毫米）
+ * 由物件适配层换算，不进入基座通道。
  */
 typedef int64_t motion_fixed_t;
 
@@ -65,7 +71,8 @@ typedef uint64_t wire_t;
 /* 这是基座唯一认识的数据。它必须自描述：                             */
 /*   - 目标是谁      (wire)                                           */
 /*   - 相对谁        (frame)                                          */
-/*   - 运动多久      (duration_ns)                                    */
+/*   - 何时发出      (issued_at_ns)                                   */
+/*   - 多久内仍新鲜  (duration_ns)                                    */
 /*   - 怎么动        (motion[])                                       */
 /*                                                                    */
 /* 刻意不含任何 opaque 载荷。其它信息走物件与大脑的直连通道。          */
@@ -74,23 +81,25 @@ typedef uint64_t wire_t;
 typedef struct {
         wire_t          wire;          /* 目标接线；WIRE_NONE 无效 */
         wire_t          frame;         /* 参照系接线；FRAME_WORLD 表示世界系 */
-        uint64_t        duration_ns;   /* 事件有效期（拾取器模型） */
+        uint64_t        issued_at_ns;  /* 事件发出时刻（调用者时钟） */
+        uint64_t        duration_ns;   /* 新鲜度窗口长度；0 的事件被拒绝 */
         uint8_t         dof;           /* 有效分量数，≤ MOTION_DOF_MAX */
-        motion_fixed_t  motion[MOTION_DOF_MAX]; /* 相对 frame 的运动 */
+        motion_fixed_t  motion[MOTION_DOF_MAX]; /* 相对 frame 的速度（决定 18） */
 } motion_event_t;
 
 /*
  * 「静止」不是一种指令，而是一个事件：
  *
  *     motion_event_t still = {
- *         .wire        = w,
- *         .frame       = FRAME_WORLD,
- *         .duration_ns = <有效期>,
- *         .dof         = 0,
- *         .motion      = { 0 },
+ *         .wire         = w,
+ *         .frame        = FRAME_WORLD,
+ *         .issued_at_ns = <发出时刻>,
+ *         .duration_ns  = <新鲜度窗口>,
+ *         .dof          = 0,
+ *         .motion       = { 0 },
  *     };
  *
- * 即「相对参照系运动为零」。这就是「静止是一种相对的运动」。
+ * 即「相对参照系速度为零」。这就是「静止是一种相对的运动」。
  */
 
 /* ------------------------------------------------------------------ */
@@ -103,14 +112,15 @@ typedef enum {
         MOTION_E_NO_WIRE   = -2,  /* 目标接线不存在或已断开 */
         MOTION_E_NO_FRAME  = -3,  /* 参照系接线不存在或已断开 */
         MOTION_E_NO_OBJECT = -4,  /* 接线当前没有物件 */
-        MOTION_E_DEADLINE  = -5,  /* 超过该事件的时间余量 */
+        MOTION_E_DEADLINE  = -5,  /* 事件已过期：发出时刻 + 窗口早于执行时钟 */
 } motion_status_t;
 
 /*
  * 施加运动 —— 基座唯一的原语。
  *
  * 成功返回 MOTION_OK。基座把事件交给目标物件，不在自身保存任何东西。
- * 事件到期后基座不做任何动作：物件继续按该事件运动。
+ * 基座不计时：新鲜度窗口由物件层按执行时钟判定（设计决定 10 修订），
+ * 过期事件以 MOTION_E_DEADLINE 拒绝；一旦接受，物件持续沿该事件运动。
  */
 motion_status_t base_apply(const motion_event_t *ev);
 

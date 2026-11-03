@@ -35,6 +35,7 @@ static motion_event_t make_event(wire_t wire, wire_t frame, u64 dur,
         motion_event_t ev;
         ev.wire = wire;
         ev.frame = frame;
+        ev.issued_at_ns = 0;
         ev.duration_ns = dur;
         ev.dof = dof;
         for (u8 i = 0; i < MOTION_DOF_MAX; i++)
@@ -42,6 +43,39 @@ static motion_event_t make_event(wire_t wire, wire_t frame, u64 dur,
         ev.motion[0] = m0;
         ev.motion[1] = m1;
         return ev;
+}
+
+/* 带发出时刻的事件：新鲜度测试与执行时钟推进后的提交都要用它。 */
+static motion_event_t make_event_at(wire_t wire, wire_t frame, u64 issued, u64 dur,
+                                    u8 dof, motion_fixed_t m0, motion_fixed_t m1)
+{
+        motion_event_t ev = make_event(wire, frame, dur, dof, m0, m1);
+        ev.issued_at_ns = issued;
+        return ev;
+}
+
+/*
+ * 测试侧独立复算量纲换算（设计决定 18），不与 object.c 共用实现。
+ *
+ * 积分用「余数进位」：每步把精确的 v * period_ns 累加进余数，
+ * 只把除得尽的整位写进位置，零头留给下一步。因此 N 步之后的位置
+ * 是 floor(N * v * period_ns / 1e9) 的最近值，与步数分配无关 ——
+ * 这正是「同一世界速度、不同周期给出同一位置」所需要的模型。
+ *
+ *   q_dist(v, period_ns, n)  N 步之后相对世界的累计位移（Q32.32 米）
+ */
+static motion_fixed_t q_dist(motion_fixed_t v, u64 period_ns, u32 n)
+{
+        motion_fixed_t carry = 0;
+        motion_fixed_t pos = 0;
+
+        for (u32 k = 0; k < n; k++) {
+                motion_fixed_t num = v * (motion_fixed_t)period_ns + carry;
+
+                pos += num / 1000000000LL;   /* 向零截断，与实现一致 */
+                carry = num % 1000000000LL;
+        }
+        return pos;
 }
 
 /* ------------------------------------------------------------------ */
@@ -430,15 +464,17 @@ static void verify_frame_rotation(void)
 
 static void verify_execution(void)
 {
-        arch_puts("\n--- execution model: each object runs at its own period ---\n\n");
+        arch_puts("\n--- execution model: velocity integrated at each object's own period ---\n\n");
 
         wire_t fast     = object_plug(2, 1 * MS);   /* 每 1 ms 一步 */
         wire_t slow     = object_plug(2, 3 * MS);   /* 每 3 ms 一步 */
         wire_t follower = object_plug(2, 1 * MS);   /* 相对 fast 静止 */
         wire_t idle     = object_plug(0, 0);        /* 未申报周期 */
 
-        motion_event_t ev = make_event(fast, FRAME_WORLD, 1000000000ULL, 1, 10, 0);
-        base_apply(&ev);
+        motion_event_t ev = make_event(fast, FRAME_WORLD, 1000000000ULL, 1, Q(1), 0);
+        base_apply(&ev);                            /* 1 m/s */
+        ev = make_event(slow, FRAME_WORLD, 1000000000ULL, 1, Q(1), 0);
+        base_apply(&ev);                            /* 同样 1 m/s：量纲对照 */
         ev = make_event(follower, fast, 1000000000ULL, 1, 0, 0);
         base_apply(&ev);
 
@@ -452,18 +488,33 @@ static void verify_execution(void)
         check("an object without a declared period is never stepped",
               object_step_count(idle) == 0);
 
+        /*
+         * 量纲冻结（决定 18）的落点：同一个 1 m/s，1 ms 周期走 9 步、
+         * 3 ms 周期走 3 步，9 ms 世界时间里前进的距离必须相同。
+         * 旧语义（每周期位移）做不到这一点。
+         */
         object_state_t st;
         bool ok = object_state(fast, &st);
-        check("motion is integrated into position (9 x 10 = 90)",
-              ok && st.position[0] == 90);
+        check("velocity integrates per period (9 steps x v dt)",
+              ok && st.position[0] == q_dist(Q(1), 1 * MS, 9));
+
+        ok = object_state(slow, &st);
+        check("slow integrates 3 steps x v dt",
+              ok && st.position[0] == q_dist(Q(1), 3 * MS, 3));
+
+        ok = object_state(fast, &st);
+        motion_fixed_t fast_pos = ok ? st.position[0] : 0;
+        ok = object_state(slow, &st) && ok;
+        check("same velocity at 1 ms and 3 ms covers the same distance in 9 ms",
+              ok && fast_pos == st.position[0]);
 
         /*
          * 相对 fast 静止的物件，在世界里跟着 fast 一起走 ——
          * 「静止是一种相对的运动」在时间推进下依然成立。
          */
         ok = object_state(follower, &st);
-        check("an object still relative to fast moves with it (90)",
-              ok && st.position[0] == 90);
+        check("an object still relative to fast moves with it",
+              ok && st.position[0] == fast_pos);
 
         /* 落后很久之后只走一步，不会一次补跑几十步 */
         object_run(100 * MS);
@@ -497,19 +548,26 @@ static void verify_conformance(void)
         check("R1 a zero-dof event is also accepted as still",
               base_apply(&ev) == MOTION_OK && object_is_still(o));
 
-        /* R2：自持 —— 事件有效期 2 ms，到期后物件仍按该事件继续运动 */
-        ev = make_event(o, FRAME_WORLD, 2 * MS, 1, 4, 0);
-        base_apply(&ev);
+        /*
+         * R2：自持 —— 窗口只约束「何时可被接受」；一旦接受，
+         * 物件沿该事件持续运动，不需要基座续喂。
+         * 执行时钟已被上一段推到 100 ms：先把钟推进一步，再以当前时刻
+         * 为发出时刻提交，避免事件在提交前就已过期。
+         */
+        object_run(101 * MS);           /* 落后一步只走一步，同时校准执行时钟 */
+        ev = make_event_at(o, FRAME_WORLD, 101 * MS, 2 * MS, 1, Q(4), 0);
+        check("R2 a fresh event is accepted",
+              base_apply(&ev) == MOTION_OK);
         u32 before = object_step_count(o);
-        for (u64 t = 1; t <= 5; t++)
+        for (u64 t = 102; t <= 106; t++)
                 object_run(t * MS);
 
         object_state_t st;
         bool ok = object_state(o, &st);
-        check("R2 the object keeps stepping after the event expires",
+        check("R2 the object keeps stepping after the window has passed",
               object_step_count(o) - before == 5);
-        check("R2 position keeps integrating past the duration (5 x 4 = 20)",
-              ok && st.position[0] == 20);
+        check("R2 position keeps integrating past the window (5 steps x v dt)",
+              ok && st.position[0] == q_dist(Q(4), 1 * MS, 5));
 
         /* R3：自述接线属性 —— 到达时申报的 unit / period_ns 可由大脑直读 */
         u32 unit = 0;
@@ -520,6 +578,53 @@ static void verify_conformance(void)
         object_unplug(o);
         check("R3 a departed object no longer declares anything",
               !object_declared(o, &unit, &period));
+}
+
+/* ------------------------------------------------------------------ */
+/* 第七部分：命令新鲜度（设计决定 10 修订）                             */
+/*                                                                    */
+/* MOTION_E_DEADLINE 在这里第一次成为可达路径：陈旧命令被拒绝，        */
+/* 绝不执行 —— 这是大脑热切换与通道拥塞场景下的安全性质。              */
+/* ------------------------------------------------------------------ */
+
+static void verify_freshness(void)
+{
+        arch_puts("\n--- freshness: a stale command is refused, never executed ---\n\n");
+
+        wire_t o = object_plug(2, 1 * MS);
+
+        /* 零长度窗口：deadline == 发出时刻，任何延迟都不可接受 */
+        motion_event_t ev = make_event_at(o, FRAME_WORLD, 0, 0, 1, Q(1), 0);
+        check("a zero-length window is rejected",
+              base_apply(&ev) == MOTION_E_INVAL);
+
+        /* 未来事件：发出时刻晚于执行时钟（执行时钟此刻约 106 ms） */
+        ev = make_event_at(o, FRAME_WORLD, 200 * MS, 1000 * MS, 1, Q(1), 0);
+        check("an event issued in the future is rejected",
+              base_apply(&ev) == MOTION_E_INVAL);
+
+        /* 过期：窗口早已闭合，命令绝不下发执行 */
+        ev = make_event_at(o, FRAME_WORLD, 0, 2 * MS, 1, Q(1), 0);
+        check("an expired event is refused with E_DEADLINE",
+              base_apply(&ev) == MOTION_E_DEADLINE);
+
+        /* 端点回绕：issued + duration 溢出会伪造一个「永不过期」的窗口 */
+        ev = make_event_at(o, FRAME_WORLD, UINT64_MAX - 3, 10, 1, Q(1), 0);
+        check("a window that wraps the clock counter is rejected",
+              base_apply(&ev) == MOTION_E_INVAL);
+
+        /* 边界：执行时钟恰在 deadline 上，仍可接受 */
+        object_run(107 * MS);
+        ev = make_event_at(o, FRAME_WORLD, 105 * MS, 2 * MS, 1, Q(1), 0);
+        check("an event exactly at its deadline is still accepted",
+              base_apply(&ev) == MOTION_OK);
+
+        /* 新鲜窗口内正常接受 */
+        ev = make_event_at(o, FRAME_WORLD, 107 * MS, 1000 * MS, 1, Q(1), 0);
+        check("a fresh event inside its window is accepted",
+              base_apply(&ev) == MOTION_OK);
+
+        object_unplug(o);
 }
 
 int base_verify(void)
@@ -533,6 +638,7 @@ int base_verify(void)
         verify_frame_rotation();
         verify_execution();
         verify_conformance();
+        verify_freshness();
 
         arch_puts("\n  failures = ");
         arch_putdec((u64)failures);

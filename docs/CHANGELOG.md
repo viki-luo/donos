@@ -10,7 +10,80 @@
 
 ## [Unreleased] / 未发布
 
+### Changed / 变更 — **破坏性：事件结构与 `motion[]` 语义**
+
+- **`motion[]` 的量纲冻结**（设计决定 18）：此前 `motion` 的含义随物件而定，
+  `object.c` 按「每个控制周期的位移」解释，文档多处按「速度」解释，两者
+  只在周期恰为 1 秒时一致。现冻结为 `motion[0..2]` = 线速度（m/s）、
+  `motion[3..5]` = 角速度（rad/s），全部 Q32.32；物件按自述 `period_ns`
+  积分：`position += v * period_ns`。设备原生单位由物件适配层换算。
+  **旧代码里 `motion = 3` 会导致物件每周期走 3 米，迁移时必须乘上 `1 << 32`**
+  / **`motion[]` units are frozen** (decision 18): the meaning of `motion` used
+  to be per-object; `object.c` read it as "displacement per control period"
+  while several docs read it as "velocity", and the two agreed only when the
+  period happened to be one second. It is now linear velocity in m/s
+  (`motion[0..2]`) and angular velocity in rad/s (`motion[3..5]`), Q32.32, and
+  an object integrates over its declared `period_ns`
+- **`duration_ns` 改为命令新鲜度窗口**（设计决定 10 修订）：此前它只是
+  「事件有效时长」的说明性字段，**从未被任何代码读取** —— `MOTION_E_DEADLINE`
+  是一个永远不可能返回的状态码。现在事件自带 `issued_at_ns`，只在
+  `[issued_at_ns, issued_at_ns + duration_ns]` 内可被接受，过期命令以
+  `MOTION_E_DEADLINE` 拒绝且绝不执行；拾取器模型的「接受后自持」不变。
+  零长度窗口、端点回绕、未来事件一律 `MOTION_E_INVAL`
+  / **`duration_ns` becomes a command freshness window** (decision 10, revised):
+  it used to be documentation only — **no code read it**, so `MOTION_E_DEADLINE`
+  was a status code that could never be returned. An event now carries
+  `issued_at_ns` and is acceptable only within
+  `[issued_at_ns, issued_at_ns + duration_ns]`; a late command is refused with
+  `MOTION_E_DEADLINE` and never executed, while pick-and-place
+  self-sustaining motion after acceptance is unchanged. Zero-length windows,
+  wrapping endpoints and events from the future are all `MOTION_E_INVAL`
+- **`motion_event_t` 增加 `issued_at_ns` 字段**：结构体成员增至 6 个
+  / **`motion_event_t` gains `issued_at_ns`**: six members instead of five
+
 ### Fixed / 修复
+
+- **`make check` 的失败门禁一直是空转**：自检行 `failures = N` 与压力测试行
+  `bench failures = N` 两处匹配用的都是无限定子串，`failures = 1` 会命中
+  `bench failures = 0` 里包含的 `failures = 0`，于是 **自检有任何失败，整个门禁
+  都报通过**；反过来压力测试那条规则永远不可能单独失败。现改为行首锚定
+  （`^  failures = 0$` / `^  bench failures = 0$`），并在失败时把命中的
+  `FAIL` 行打印出来，而不是只说一句「失败」
+  / **`make check`'s failure gate never actually fired**: both the self-test
+  line `failures = N` and the stress line `bench failures = N` were matched with
+  unanchored substrings, so `failures = 1` matched the `failures = 0` inside
+  `bench failures = 0` — any number of self-test failures still reported a
+  pass, and the stress-test rule could never fail on its own. Both patterns are
+  now line-anchored, and a failure prints the `FAIL` lines it found
+- **速度积分单向漂移**：每步 `v * period_ns / 1e9` 各自截断到最低位，
+  误差恒为同号，随步数线性累积 —— 3 m/s、100 Hz 走一秒后位置是
+  `2.99999993` 而不是 `3`，`>> 32` 取整印出来是 `2` m。改为**余数进位**：
+  不足一个最低位的零头留在物件侧的 `carry[3]` 里，下一步补上，
+  因此不同周期的积分路径给出逐比特相同的结果
+  / **unidirectional drift in velocity integration**: each step truncated
+  `v * period_ns` to the least significant bit independently, so the error kept
+  its sign and grew linearly with step count — 3 m/s at 100 Hz for one second
+  landed on `2.99999993` m, and the truncating readout printed `2`. Integration
+  now uses **remainder carry**: the sub-bit remainder lives on the object side
+  in `carry[3]` and is applied to the next step, so paths with different periods
+  give bit-identical results
+- **`object_plug()` 拒绝超长周期**：`OBJECT_PERIOD_NS_MAX`（1 s）之上的申报
+  会让 64 位积分溢出，改为在到达时拒绝而不是静默截断
+  / **`object_plug()` refuses over-long periods**: declarations above
+  `OBJECT_PERIOD_NS_MAX` (1 s) would overflow the 64-bit integration; now
+  refused on arrival instead of silently truncated
+
+### Added / 新增
+
+- **新鲜度验证段**（`base/verify.c`，第七部分）：零长度窗口拒绝、过期事件
+  返回 `MOTION_E_DEADLINE`、端点回绕拒绝、边界 `now == deadline` 接受、
+  未来事件拒绝 —— `MOTION_E_DEADLINE` 由此第一次成为可达路径
+  / **freshness verification section** (`base/verify.c`, part 7): zero-length
+  window refused, expired event returns `MOTION_E_DEADLINE`, wrapping endpoint
+  refused, boundary `now == deadline` accepted, event from the future refused —
+  `MOTION_E_DEADLINE` is reachable for the first time
+
+### Changed / 变更
 
 - **句柄高位别名**：`WIRE_GEN` 右移后截断为 32 位，此前未校验高 16 位，
   对任意有效句柄置位高位即可得到一个同时有效、却与原文不同的别名。

@@ -72,24 +72,50 @@ This is the **entire secret** of a workable stateless base: it needs no memory b
 
 The converse also holds: **the base can be stateless precisely because "stillness" is relative** — the frame can come from the event rather than from the base.
 
-### 3.1.1 Semantics of `duration_ns`: the pick-and-place model
+### 3.1.1 Semantics of `duration_ns`: a command freshness window
 
-`duration_ns` is the **validity period of the event** (pick-and-place model), not "how long to keep pushing" (remote-control model).
+`duration_ns` used to mean "how long this event stays valid". That reading has two holes:
 
-| Model | Semantics | After the event ends |
+1. **It cannot be refused.** If a window only makes a command expire *later*, every late command still
+   runs — a grasp commanded in a basement two hours ago is still valid when it reaches the table.
+2. **It was a dead field in the implementation.** `duration_ns` never took part in any validation, refusal,
+   or replacement, and `MOTION_E_DEADLINE` was consequently unreachable. A status code that can never fire is
+   not a safety net; it is the illusion of one.
+
+It is now frozen as a **command freshness window**: the event carries its own issue time, and it must be
+accepted no later than `issued_at_ns + duration_ns`.
+
+| Model | Semantics | Once the window closes |
 |---|---|---|
 | Remote control | keep pushing; release and it falls back | object returns to a default state |
-| **Pick-and-place** | **place the object onto a trajectory** | **the object keeps moving along it** |
+| Pick-and-place | place the object onto a trajectory | the object keeps moving along it |
+| **Freshness (current)** | **acceptable only inside the window** | **late commands are refused, not executed; an accepted trajectory still runs to completion** |
 
-**The pick-and-place model is adopted.** It is consistent with every confirmed design decision:
+The pick-and-place model's *self-sustaining* property is kept in full: after acceptance nothing needs to be
+fed in again, the object follows its trajectory on its own. What changed is only the "acceptance" step, which
+now has a time gate.
 
-| Design decision | How pick-and-place satisfies it |
+| Design decision | How a freshness window satisfies it |
 |---|---|
-| The base is stateless | after the event ends, the base maintains nothing |
-| Objects carry their own motion capability | the object continues along its trajectory by itself |
-| The brain is hot-pluggable | when the brain disconnects, the world does not freeze; it finishes its events |
+| The base is stateless | deciding needs only "now" plus two numbers in the event; the base stores no time, and the decision lives on the object side |
+| Objects carry their own motion capability | closing the window does not disturb a trajectory already accepted |
+| The brain is hot-pluggable | commands left behind by a retired brain are refused outright by the new execution clock |
+| Stillness is relative | unchanged: "still" is still an event with `motion = 0` |
 
-> **An event has a lifetime; after that lifetime, the object is still moving.**
+> **An event has a lifetime; it only takes effect inside that lifetime. Once accepted, the object is still moving.**
+
+The boundaries are written down, one by one:
+
+| Case | Result |
+|---|---|
+| `duration_ns == 0` | `MOTION_E_INVAL` (a zero-length window is never valid) |
+| `issued_at_ns + duration_ns` wraps | `MOTION_E_INVAL` (otherwise it forges a window that never expires) |
+| `issued_at_ns > now` | `MOTION_E_INVAL` (an event from the future: the time source is broken) |
+| `now == deadline` | accepted (the moment the window closes is still inside it) |
+| `now > deadline` | `MOTION_E_DEADLINE` (refused, never executed) |
+
+"Now" comes from the object side — the most recent `object_run(now_ns)`. The base does not keep time, so the
+deadline test can only be made there. That is not a compromise; it follows directly from being stateless.
 
 ### 3.1.2 The shape of a motion event
 
@@ -100,13 +126,14 @@ The converse also holds: **the base can be stateless precisely because "stillnes
 typedef struct {
     u64 wire;                    /* target: a wiring handle; 0 is invalid */
     u64 frame;                   /* frame of reference: another wiring; 0 = world */
-    u64 duration_ns;             /* validity period (pick-and-place) */
+    u64 issued_at_ns;            /* when the event was issued (caller's clock) */
+    u64 duration_ns;             /* freshness window length; 0 is invalid */
     u8  dof;                     /* number of active components, <= 6 */
-    s64 motion[MOTION_DOF_MAX];  /* motion relative to frame, fixed-point */
+    s64 motion[MOTION_DOF_MAX];  /* velocity relative to frame, Q32.32 */
 } motion_event_t;
 ```
 
-Five fields map to the parameters of the single primitive — no more, no fewer.
+Six fields map to the parameters of the single primitive — no more, no fewer.
 
 **Crucially, `motion` means "motion relative to `frame`".**
 
@@ -182,9 +209,10 @@ All data crossing the base boundary, in one place. **There are only three routes
 typedef struct {
         wire_t          wire;          /* target wire */
         wire_t          frame;         /* reference frame; 0 = world */
-        uint64_t        duration_ns;   /* event validity (pick-and-place model) */
+        uint64_t        issued_at_ns;  /* when issued (caller's clock) */
+        uint64_t        duration_ns;   /* freshness window length */
         uint8_t         dof;           /* active components, <= 6 */
-        motion_fixed_t  motion[6];     /* motion relative to frame, Q32.32 */
+        motion_fixed_t  motion[6];     /* velocity relative to frame, Q32.32 */
 } motion_event_t;
 ```
 
@@ -209,7 +237,7 @@ So an object has exactly **two forms of existence** in the whole system: **alive
 In the object itself; the base does not even know it exists:
 
 ```
-motion[6]   frame   duration_ns   dof   event_count
+motion[6]   frame   duration_ns   carry[3]   dof   event_count
 ```
 
 ### 3.7 Why "zero states"
@@ -331,14 +359,15 @@ Just as IP is the narrow waist of the network: everything passes over it, yet ap
 7. The brain is hot-pluggable and seamless; it relates to the base only on motion control
 8. All other information flows **directly** between objects and the brain
 9. Deciding still / moving belongs to the brain, not the base
-10. `duration_ns` uses the **pick-and-place model**: the event's validity period; afterwards the object keeps moving along its trajectory
-11. Motion events are **fixed-point, payload-free, and self-describing**: `{wire, frame, duration_ns, dof, motion[]}`
+10. `duration_ns` is a **command freshness window**: the event carries its issue time `issued_at_ns` and may be accepted only within `[issued_at_ns, issued_at_ns + duration_ns]`; a late event is refused with `MOTION_E_DEADLINE` and never executed. **After acceptance** the object keeps moving along that event — pick-and-place's self-sustaining property lives on past the window, which constrains only how late a command may arrive
+11. Motion events are **fixed-point, payload-free, and self-describing**: `{wire, frame, issued_at_ns, duration_ns, dof, motion[]}`
 12. `motion` is **motion relative to `frame`**; "still" is simply `motion = 0`
 13. **Everything is a motion object**; a brain is just an ordinary wire with **no "brain slot"**. The base is symmetric, grants no authority and judges nothing; brains can be stacked arbitrarily. **The base is the only non-object** — not a thing in the world, but the world's motion-control function
 14. **Wire handles stay stable across slot reuse**: encoded as `(generation << 16) | slot` with a monotonic generation. A departed handle never comes back to life — otherwise, after a hot-plug, an old brain would command whatever new object took the same slot
 15. **Objects resolve their own frame (option A)**: an object walks the frame chain and reads each frame object's motion directly — **objects may connect to each other directly**, never through the base. The base only checks that the `frame` wire is valid right now; it cannot see the chain and therefore cannot detect cycles. Cycles and broken chains are detected and rejected on the object side
 16. **The execution model lives outside the base**: an execution layer advances each object's motion loop at the `period_ns` the object declared on arrival; time is supplied by the caller (the architecture clock), and the base neither schedules nor keeps time. Objects with no declared period (`period_ns = 0`) are never advanced; a late run does not catch up but reschedules from the current time
 17. **About a wire the base knows only whether it is alive**: `base_arrive()` takes no arguments, and each wiring-table slot holds only a generation and an in-use flag. Self-declared properties such as unit and control period are kept by the object and read directly by the brain through `object_declared()`, never through the base
+18. **Motion units are frozen**: `motion[0..2]` are linear velocity in m/s and `motion[3..5]` angular velocity in rad/s, all Q32.32. An object integrates velocity into pose over its declared `period_ns`: `position += v * period_ns`. Integration uses **remainder carry**, not re-rounding every step — per-step truncation errs in one constant direction, accumulates linearly with step count, and so effectively lets the period rewrite the velocity. Device-native units (degrees, encoder ticks, millimetres) are converted by the object's adapter layer and never enter the base's channel; "the same event produces the same world velocity on objects with different periods" is therefore a verifiable property, not a convention
 
 ---
 

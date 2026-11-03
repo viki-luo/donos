@@ -102,14 +102,19 @@ void kernel_main(u32 magic, u32 info)
         wire_t hand = object_plug(2, NS_PER_TICK);
 
         motion_event_t ev;
-        ev.duration_ns = 1000000000ULL;
+        /*
+         * 演示事件永不过期（issued = 0，窗口取满）：现场演示关注的是
+         * 「接受后自持」，新鲜度语义由 verify_freshness 专门验证。
+         */
+        ev.issued_at_ns = 0;
+        ev.duration_ns = UINT64_MAX;
         ev.dof = 1;
         for (u8 i = 0; i < MOTION_DOF_MAX; i++)
                 ev.motion[i] = 0;
 
-        ev.wire = arm;                  /* arm 相对世界每步 3 */
+        ev.wire = arm;                  /* arm 相对世界 3 m/s（决定 18） */
         ev.frame = FRAME_WORLD;
-        ev.motion[0] = 3;
+        ev.motion[0] = (motion_fixed_t)3 << 32;
         base_apply(&ev);
 
         ev.wire = hand;                 /* hand 相对 arm 静止 */
@@ -142,14 +147,14 @@ void kernel_main(u32 magic, u32 info)
                         arch_puts("    arm  steps = ");
                         arch_putdec(object_step_count(arm));
                         if (object_state(arm, &st)) {
-                                arch_puts(", position = ");
-                                arch_putdec((u64)st.position[0]);
+                                arch_puts(", position (m) = ");
+                                arch_putdec((u64)(st.position[0] >> 32));
                         }
                         arch_puts("\n    hand steps = ");
                         arch_putdec(object_step_count(hand));
                         if (object_state(hand, &st)) {
-                                arch_puts(", position = ");
-                                arch_putdec((u64)st.position[0]);
+                                arch_puts(", position (m) = ");
+                                arch_putdec((u64)(st.position[0] >> 32));
                         }
                         arch_puts("  (still relative to arm)\n");
                         if (object_step_count(arm) != now - start)

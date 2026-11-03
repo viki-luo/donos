@@ -164,8 +164,8 @@ check:
 	for arch in x86_64 riscv64; do \
 		log=build/bench-$$arch.log; \
 		test -s $$log || { echo "缺少日志 $$log"; exit 1; }; \
-		grep -q 'failures = 0' $$log || { echo "$$arch 自检失败"; exit 1; }; \
-		grep -q 'bench failures = 0' $$log || { echo "$$arch 压力测试失败"; exit 1; }; \
+		grep -qE '^  failures = 0$$' $$log || { echo "$$arch 自检失败"; grep -E '^  (FAIL|failures)' $$log; exit 1; }; \
+		grep -qE '^  bench failures = 0$$' $$log || { echo "$$arch 压力测试失败"; grep -E 'bench failures' $$log; exit 1; }; \
 		grep -q 'protection: what the MMU actually enforces' $$log || { echo "$$arch 未自报保护状态"; exit 1; }; \
 		if logs=$$($(NM) build/$$arch/liteos.bin 2>/dev/null | grep ' U ' | awk '{print $$2}'); \
 		   [ -n "$$logs" ]; then \
