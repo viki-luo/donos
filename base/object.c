@@ -11,6 +11,7 @@
  * 一旦运动状态搬进基座，基座就有状态了，整个模型随之崩塌。
  */
 #include "base.h"
+#include "fixed.h"
 #include "object.h"
 
 typedef struct {
@@ -305,44 +306,68 @@ bool object_state(wire_t w, object_state_t *out)
  * 为什么不直接用 >> 32：算术右移对负数是向 −∞ 取整。参照系旋转会
  * 处理反向分量，向 −∞ 取整在该侧恒偏小，等于给旋转加了单向偏差。
  */
-static motion_fixed_t shr_round_32(__int128 v)
-{
-        const unsigned __int128 half = (unsigned __int128)1 << 31;
-
-        if (v >= 0)
-                return (motion_fixed_t)((v + (__int128)half) >> 32);
-
-        /* |v| = -(v + 1) + 1，这种写法对 INT128_MIN 也成立 */
-        unsigned __int128 mag = (unsigned __int128)(-(v + 1)) + 1u;
-        return (motion_fixed_t)(-((__int128)((mag + half) >> 32)));
-}
-
-/* Q32.32 乘法：128 位中间积，避免溢出；不涉及除法，不需要编译器运行库。 */
-static motion_fixed_t qmul(motion_fixed_t a, motion_fixed_t b)
-{
-        return shr_round_32((__int128)a * b);
-}
-
 /*
  * 用单位四元数 q = {w, x, y, z} 旋转三维向量 v：
  *     t  = 2 (u × v)
  *     v' = v + w t + u × t        其中 u = (x, y, z)
  *
- * 全零四元数视为「未申报姿态」，按无旋转处理。
+ * 所有定点运算都经过 checked 层。任一中间值超出 Q32.32 表示范围时
+ * 返回 false，调用者不得使用部分计算结果。
+ * 全零四元数暂时仍视为「未申报姿态」，按无旋转处理；其语义将在
+ * frame/四元数阶段进一步收紧。
  */
-static void rotate3(const motion_fixed_t q[4], motion_fixed_t v[3])
+static bool rotate3(const motion_fixed_t q[4], motion_fixed_t v[3])
 {
-        if (q[0] == 0 && q[1] == 0 && q[2] == 0 && q[3] == 0)
-                return;
-
         motion_fixed_t w = q[0], x = q[1], y = q[2], z = q[3];
-        motion_fixed_t t0 = 2 * (qmul(y, v[2]) - qmul(z, v[1]));
-        motion_fixed_t t1 = 2 * (qmul(z, v[0]) - qmul(x, v[2]));
-        motion_fixed_t t2 = 2 * (qmul(x, v[1]) - qmul(y, v[0]));
+        motion_fixed_t yv2, zv1, zv0, xv2, xv1, yv0;
+        motion_fixed_t cross0, cross1, cross2;
+        motion_fixed_t t0, t1, t2;
+        motion_fixed_t wt0, yt2, zt1;
+        motion_fixed_t wt1, zt0, xt2;
+        motion_fixed_t wt2, xt1, yt0;
+        motion_fixed_t sum, next[3];
 
-        v[0] += qmul(w, t0) + qmul(y, t2) - qmul(z, t1);
-        v[1] += qmul(w, t1) + qmul(z, t0) - qmul(x, t2);
-        v[2] += qmul(w, t2) + qmul(x, t1) - qmul(y, t0);
+        if (q[0] == 0 && q[1] == 0 && q[2] == 0 && q[3] == 0)
+                return true;
+
+        if (fixed_mul_checked(y, v[2], &yv2) != FIXED_OK ||
+            fixed_mul_checked(z, v[1], &zv1) != FIXED_OK ||
+            fixed_sub_checked(yv2, zv1, &cross0) != FIXED_OK ||
+            fixed_mul2_checked(cross0, &t0) != FIXED_OK ||
+            fixed_mul_checked(z, v[0], &zv0) != FIXED_OK ||
+            fixed_mul_checked(x, v[2], &xv2) != FIXED_OK ||
+            fixed_sub_checked(zv0, xv2, &cross1) != FIXED_OK ||
+            fixed_mul2_checked(cross1, &t1) != FIXED_OK ||
+            fixed_mul_checked(x, v[1], &xv1) != FIXED_OK ||
+            fixed_mul_checked(y, v[0], &yv0) != FIXED_OK ||
+            fixed_sub_checked(xv1, yv0, &cross2) != FIXED_OK ||
+            fixed_mul2_checked(cross2, &t2) != FIXED_OK)
+                return false;
+
+        if (fixed_mul_checked(w, t0, &wt0) != FIXED_OK ||
+            fixed_mul_checked(y, t2, &yt2) != FIXED_OK ||
+            fixed_mul_checked(z, t1, &zt1) != FIXED_OK ||
+            fixed_add_checked(v[0], wt0, &sum) != FIXED_OK ||
+            fixed_add_checked(sum, yt2, &sum) != FIXED_OK ||
+            fixed_sub_checked(sum, zt1, &next[0]) != FIXED_OK ||
+            fixed_mul_checked(w, t1, &wt1) != FIXED_OK ||
+            fixed_mul_checked(z, t0, &zt0) != FIXED_OK ||
+            fixed_mul_checked(x, t2, &xt2) != FIXED_OK ||
+            fixed_add_checked(v[1], wt1, &sum) != FIXED_OK ||
+            fixed_add_checked(sum, zt0, &sum) != FIXED_OK ||
+            fixed_sub_checked(sum, xt2, &next[1]) != FIXED_OK ||
+            fixed_mul_checked(w, t2, &wt2) != FIXED_OK ||
+            fixed_mul_checked(x, t1, &xt1) != FIXED_OK ||
+            fixed_mul_checked(y, t0, &yt0) != FIXED_OK ||
+            fixed_add_checked(v[2], wt2, &sum) != FIXED_OK ||
+            fixed_add_checked(sum, xt1, &sum) != FIXED_OK ||
+            fixed_sub_checked(sum, yt0, &next[2]) != FIXED_OK)
+                return false;
+
+        v[0] = next[0];
+        v[1] = next[1];
+        v[2] = next[2];
+        return true;
 }
 
 bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX])
@@ -368,11 +393,18 @@ bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX])
                  * 转到 f 的上一级坐标，再叠加 f 自身的运动。
                  * 线运动（0..2）与角运动（3..5）都是三维向量，各转一次。
                  */
-                rotate3(f->state.orientation, &out[0]);
-                rotate3(f->state.orientation, &out[3]);
+                if (!rotate3(f->state.orientation, &out[0]) ||
+                    !rotate3(f->state.orientation, &out[3]))
+                        return false;
 
-                for (u8 i = 0; i < MOTION_DOF_MAX; i++)
-                        out[i] += f->motion[i];
+                for (u8 i = 0; i < MOTION_DOF_MAX; i++) {
+                        motion_fixed_t combined;
+
+                        if (fixed_add_checked(out[i], f->motion[i],
+                                              &combined) != FIXED_OK)
+                                return false;
+                        out[i] = combined;
+                }
                 frame = f->frame;
         }
         return true;
@@ -398,7 +430,7 @@ bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX])
  *     carry[i] = acc % 1e9                     （不足一位的余数留到下一步）
  *
  * 每步各自取整时，舍入误差恒为同号，会随步数线性累积：同样 3 m/s、
- * 同样 9 ms，1 ms 周期与 3 ms 周期会差出 9 个最低位")，且周期越细
+ * 同样 9 ms，1 ms 周期与 3 ms 周期会差出 9 个最低位，且周期越细
  * 误差越大——那不是「精度问题」，而是速度本身被周期改写了。
  * 余数进位把丢掉的零头存下来在下一次补上，误差只在 ±1 个最低位之间
  * 摆动而不累积，因此两条不同周期的积分路径给出逐比特相同的结果。
@@ -412,46 +444,34 @@ static void object_step(object_t *o)
         motion_fixed_t r[MOTION_DOF_MAX];
 
         if (object_resolve(o->wire, r)) {
-                for (u8 i = 0; i < 3 && i < o->dof; i++) {
-                        /*
-                         * 余数进位积分（整数域，不碰 128 位除法）：
-                         *
-                         *   num  = v * period_ns + carry   （单位：LSB·ns）
-                         *   step = num / 1e9               （本步整数位）
-                         *   carry = num % 1e9              （留到下一步）
-                         *
-                         * 1e9 是编译期常量，除法被折成立即数与乘法；
-                         * 128 位一般除法会拉进 __divti3，必须避开。
-                         *
-                         * 只能用 64 位中间量，因此要求
-                         *     |v| * period_ns < 2^63 - 1e9
-                         * 对 period_ns ≤ 10 ms 意味着 |v| ≤ 9.2e11 m/s，
-                         * 远超任何运动系统的速度上限（见 object_plug 校验）。
-                         *
-                         * C 的 / 与 % 向零截断：负速度得到负步长负余数，
-                         * 进位方向与运动方向一致。
-                         */
-                        /*
-                         * 余数进位积分（只在 64 位整数域做除法）：
-                         *
-                         *   num  = v * period_ns + carry   （单位：LSB·ns）
-                         *   step = num / 1e9               （本步整数位）
-                         *   carry = num % 1e9              （留到下一步）
-                         *
-                         * carry 恒在 (−1e9, 1e9) 内，因此只要
-                         * |v| * period_ns < 2^63 - 1e9，num 就装得进 int64，
-                         * 除法不会退化成 128 位（128 位一般除法会拉进
-                         * __divti3，裸机没有库可以链接）。object_plug()
-                         * 校验 period_ns 上限，速度上限由调用者遵守。
-                         *
-                         * C 的 / 与 % 向零截断：负速度得到负步长负余数，
-                         * 进位方向与运动方向一致。
-                         */
-                        motion_fixed_t num = r[i] * (motion_fixed_t)o->period_ns
-                                           + o->carry[i];
+                motion_fixed_t next_position[3];
+                motion_fixed_t next_carry[3];
+                u8 count = o->dof < 3 ? o->dof : 3;
+                bool valid = true;
 
-                        o->state.position[i] += num / 1000000000LL;
-                        o->carry[i] = num % 1000000000LL;
+                /*
+                 * 先在临时值中计算整步，全部轴都成功后再一次性提交。
+                 * 这样任一速度积分或位置累计溢出时，物件不会留下
+                 * 「两个轴已更新、第三个轴失败」的半步状态。
+                 */
+                for (u8 i = 0; i < count; i++) {
+                        motion_fixed_t delta;
+
+                        if (fixed_velocity_step_checked(r[i], o->period_ns,
+                                                        o->carry[i], &delta,
+                                                        &next_carry[i]) != FIXED_OK ||
+                            fixed_add_checked(o->state.position[i], delta,
+                                              &next_position[i]) != FIXED_OK) {
+                                valid = false;
+                                break;
+                        }
+                }
+
+                if (valid) {
+                        for (u8 i = 0; i < count; i++) {
+                                o->state.position[i] = next_position[i];
+                                o->carry[i] = next_carry[i];
+                        }
                 }
         }
         o->step_count++;

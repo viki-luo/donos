@@ -6,6 +6,7 @@
  * 整个「一切皆是运动物件」就不成立了，而这里会直接失败。
  */
 #include "base.h"
+#include "fixed.h"
 #include "object.h"
 #include "report.h"
 #include "verify.h"
@@ -70,10 +71,17 @@ static motion_fixed_t q_dist(motion_fixed_t v, u64 period_ns, u32 n)
         motion_fixed_t pos = 0;
 
         for (u32 k = 0; k < n; k++) {
-                motion_fixed_t num = v * (motion_fixed_t)period_ns + carry;
+                motion_fixed_t step;
+                motion_fixed_t next_carry;
+                motion_fixed_t next_pos;
 
-                pos += num / 1000000000LL;   /* 向零截断，与实现一致 */
-                carry = num % 1000000000LL;
+                if (fixed_velocity_step_checked(v, period_ns, carry,
+                                                &step, &next_carry) != FIXED_OK ||
+                    fixed_add_checked(pos, step, &next_pos) != FIXED_OK)
+                        return 0;
+
+                pos = next_pos;
+                carry = next_carry;
         }
         return pos;
 }
@@ -392,7 +400,12 @@ static void verify_frame_resolution(void)
 
 static bool near(motion_fixed_t a, motion_fixed_t b)
 {
-        motion_fixed_t d = a - b;
+        motion_fixed_t d;
+
+        if (fixed_sub_checked(a, b, &d) != FIXED_OK)
+                return false;
+        if (d == INT64_MIN)
+                return false;
         if (d < 0)
                 d = -d;
         return d < Q(1) / 1000;          /* 定点舍入误差容限 0.001 */
@@ -587,6 +600,45 @@ static void verify_conformance(void)
 /* 绝不执行 —— 这是大脑热切换与通道拥塞场景下的安全性质。              */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* 第七部分：checked Q32.32 算术边界                                   */
+/* ------------------------------------------------------------------ */
+
+static void verify_fixed_boundaries(void)
+{
+        motion_fixed_t out = 0;
+        motion_fixed_t delta = 0;
+        motion_fixed_t carry = 0;
+
+        arch_puts("\n--- checked Q32.32 arithmetic boundaries ---\n\n");
+
+        check("checked add rejects INT64_MAX + 1",
+              fixed_add_checked(INT64_MAX, 1, &out) == FIXED_E_OVERFLOW);
+        check("checked add rejects INT64_MIN - 1",
+              fixed_add_checked(INT64_MIN, -1, &out) == FIXED_E_OVERFLOW);
+        check("checked subtract rejects INT64_MIN - 1",
+              fixed_sub_checked(INT64_MIN, 1, &out) == FIXED_E_OVERFLOW);
+        check("checked Q32.32 multiply rejects an unrepresentable result",
+              fixed_mul_checked(INT64_MAX, INT64_MAX, &out) ==
+                      FIXED_E_OVERFLOW);
+
+        check("3 m/s over one second is integrated without signed overflow",
+              fixed_velocity_step_checked(Q(3), 1000000000ULL, 0,
+                                          &delta, &carry) == FIXED_OK &&
+              delta == Q(3) && carry == 0);
+        check("INT64_MAX velocity over one second remains representable",
+              fixed_velocity_step_checked(INT64_MAX, 1000000000ULL, 0,
+                                          &delta, &carry) == FIXED_OK &&
+              delta == INT64_MAX && carry == 0);
+        check("INT64_MIN velocity over one second remains representable",
+              fixed_velocity_step_checked(INT64_MIN, 1000000000ULL, 0,
+                                          &delta, &carry) == FIXED_OK &&
+              delta == INT64_MIN && carry == 0);
+        check("an invalid carry boundary is refused",
+              fixed_velocity_step_checked(0, 1, 1000000000LL,
+                                          &delta, &carry) == FIXED_E_INVAL);
+}
+
 static void verify_freshness(void)
 {
         arch_puts("\n--- freshness: a stale command is refused, never executed ---\n\n");
@@ -638,6 +690,7 @@ int base_verify(void)
         verify_frame_rotation();
         verify_execution();
         verify_conformance();
+        verify_fixed_boundaries();
         verify_freshness();
 
         arch_puts("\n  failures = ");

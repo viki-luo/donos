@@ -43,6 +43,30 @@
 
 ### Fixed / 修复
 
+- **Q32.32 算术未定义行为**：速度积分此前直接计算有符号 64 位
+  `velocity * period_ns + carry`。例如 Q32.32 的 3 m/s 乘 1 秒周期得到
+  `12,884,901,888,000,000,000`，超过 `INT64_MAX`，会进入 C 有符号溢出
+  未定义行为。新增 `base/fixed.c` checked 算术层；速度积分先把速度分成
+  整数项与绝对值小于 `1e9` 的余数项，分别计算后合并，不使用 128 位除法，
+  也不引入 `__divti3`。加、减、乘二、Q32.32 乘法、参照链累加、四元数
+  旋转与位置累计全部改为显式报告溢出；单步三个位置轴先在临时值中完成，
+  任一轴失败时不提交半步状态
+  / **undefined behavior in Q32.32 arithmetic**: velocity integration directly
+  evaluated signed 64-bit `velocity * period_ns + carry`. At 3 m/s in Q32.32
+  and a one-second period, the product is `12,884,901,888,000,000,000`, beyond
+  `INT64_MAX`, invoking signed-overflow UB. A checked arithmetic layer now
+  decomposes velocity into a whole term and a remainder below `1e9`, avoiding
+  both signed overflow and 128-bit division helpers. Checked add, subtract,
+  double, Q32.32 multiply, frame accumulation, quaternion rotation and position
+  accumulation now fail explicitly; all position axes commit atomically only
+  after the complete step succeeds
+- **宿主边界测试与 UBSan 陷阱门禁**：新增 `make host-test` 与
+  `make sanitize`，覆盖 `INT64_MIN/MAX`、3 m/s × 1 s、carry 边界、周期上界、
+  正负 Q32.32 乘法和 1 ms/3 ms 余数进位等价性
+  / **host boundary tests and UBSan trap gate**: `make host-test` and
+  `make sanitize` cover `INT64_MIN/MAX`, 3 m/s × 1 s, carry boundaries, the
+  period limit, signed Q32.32 multiplication, and 1 ms/3 ms remainder-carry
+  equivalence
 - **`make check` 的失败门禁一直是空转**：自检行 `failures = N` 与压力测试行
   `bench failures = N` 两处匹配用的都是无限定子串，`failures = 1` 会命中
   `bench failures = 0` 里包含的 `failures = 0`，于是 **自检有任何失败，整个门禁
@@ -67,11 +91,11 @@
   now uses **remainder carry**: the sub-bit remainder lives on the object side
   in `carry[3]` and is applied to the next step, so paths with different periods
   give bit-identical results
-- **`object_plug()` 拒绝超长周期**：`OBJECT_PERIOD_NS_MAX`（1 s）之上的申报
-  会让 64 位积分溢出，改为在到达时拒绝而不是静默截断
-  / **`object_plug()` refuses over-long periods**: declarations above
-  `OBJECT_PERIOD_NS_MAX` (1 s) would overflow the 64-bit integration; now
-  refused on arrival instead of silently truncated
+- **`object_plug()` 拒绝超长周期**：`OBJECT_PERIOD_NS_MAX`（1 s）为执行模型
+  给出明确上界；算术安全不再依赖该上界，而由 checked fixed-point 层独立保证
+  / **`object_plug()` refuses over-long periods**: `OBJECT_PERIOD_NS_MAX`
+  (1 s) is an explicit execution-model bound; arithmetic safety no longer
+  relies on it and is enforced independently by the checked fixed-point layer
 
 ### Added / 新增
 

@@ -188,7 +188,7 @@ clean:
 
 # 符号门禁：镜像必须存在、非空，且不含任何未定义符号。
 # 裸机没有运行时库可链接，所以任何 ' U ' 符号都是运行时跳向地址零。
-.PHONY: check-symbols check-docs check-release check-all
+.PHONY: check-symbols check-docs check-release check-all host-test sanitize
 check-symbols:
 	@set -e; \
 	for arch in x86_64 riscv64; do \
@@ -214,8 +214,31 @@ check-docs:
 	fi; \
 	echo "  ok   无发布占位符"
 
+HOST_CC     ?= clang
+HOST_CFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror \
+               -Ibase/include
+HOST_TEST   := build/host/test_fixed.exe
+
+$(HOST_TEST): tests/host/test_fixed.c base/fixed.c base/include/fixed.h \
+              base/include/base.h base/include/types.h
+	@mkdir -p build/host
+	$(HOST_CC) $(HOST_CFLAGS) tests/host/test_fixed.c base/fixed.c -o $@
+
+host-test: $(HOST_TEST)
+	@$(HOST_TEST)
+
+# MinGW 的 UBSan 运行库并非所有发行包都完整，因此使用 trap-on-error：
+# 编译器在任何 UB 点直接发出陷阱指令，不需要链接 sanitizer runtime。
+sanitize:
+	@mkdir -p build/host
+	$(HOST_CC) $(HOST_CFLAGS) -fsanitize=undefined \
+		-fsanitize-undefined-trap-on-error \
+		tests/host/test_fixed.c base/fixed.c \
+		-o build/host/test_fixed_ubsan.exe
+	@build/host/test_fixed_ubsan.exe
+
 check-release: check-symbols check-docs
 	@echo "=== 发布前门禁通过 / release gate passed ==="
 
-check-all: check check-release
+check-all: check host-test sanitize check-release
 	@echo "=== 全部门禁通过 / all gates passed ==="
