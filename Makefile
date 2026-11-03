@@ -164,6 +164,9 @@ check:
 	for arch in x86_64 riscv64; do \
 		log=build/bench-$$arch.log; \
 		test -s $$log || { echo "缺少日志 $$log"; exit 1; }; \
+		if grep -qE '^  FAIL ' $$log; then \
+			echo "$$arch 自检有明确失败行"; grep -E '^  FAIL ' $$log; exit 1; \
+		fi; \
 		grep -qE '^  failures = 0$$' $$log || { echo "$$arch 自检失败"; grep -E '^  (FAIL|failures)' $$log; exit 1; }; \
 		grep -qE '^  bench failures = 0$$' $$log || { echo "$$arch 压力测试失败"; grep -E 'bench failures' $$log; exit 1; }; \
 		grep -q 'protection: what the MMU actually enforces' $$log || { echo "$$arch 未自报保护状态"; exit 1; }; \
@@ -178,3 +181,41 @@ check:
 
 clean:
 	rm -rf build
+
+# ---------------------------------------------------------------------
+# 独立门禁：每一项都只断言一个可证伪的事实。
+# ---------------------------------------------------------------------
+
+# 符号门禁：镜像必须存在、非空，且不含任何未定义符号。
+# 裸机没有运行时库可链接，所以任何 ' U ' 符号都是运行时跳向地址零。
+.PHONY: check-symbols check-docs check-release check-all
+check-symbols:
+	@set -e; \
+	for arch in x86_64 riscv64; do \
+		bin=build/$$arch/liteos.bin; \
+		test -s $$bin || { echo "缺少镜像 $$bin"; exit 1; }; \
+		out=$$($(NM) $$bin 2>/dev/null | grep ' U ' || true); \
+		if [ -n "$$out" ]; then \
+			echo "$$arch 仍有未定义符号:"; echo "$$out"; exit 1; \
+		fi; \
+		echo "  ok   $$arch 无未定义符号"; \
+	done
+
+# 文档门禁：中英文必须成对存在，且不得残留发布占位符
+check-docs:
+	@set -e; \
+	for pair in design conformance assessment boot; do \
+		test -f docs/$$pair.md || { echo "缺少 docs/$$pair.md"; exit 1; }; \
+		test -f docs/$$pair.en.md || { echo "缺少 docs/$$pair.en.md"; exit 1; }; \
+	done; \
+	echo "  ok   中英文文档成对"; \
+	if grep -Rn 'OWNER/REPO\|@OWNER' --include='*.md' --include='*.yml' --include='*.cff' . ; then \
+		echo "  仍有 OWNER/REPO 占位符（发布前必须替换）"; exit 1; \
+	fi; \
+	echo "  ok   无发布占位符"
+
+check-release: check-symbols check-docs
+	@echo "=== 发布前门禁通过 / release gate passed ==="
+
+check-all: check check-release
+	@echo "=== 全部门禁通过 / all gates passed ==="
