@@ -380,6 +380,8 @@ position[3]   orientation[4]   motion[6]   frame   duration_ns   carry[3]   dof 
 20. **申报即承诺**：物件申报的能力会被校验，非法申报**整体拒绝**（`dof > 6`、有效轴上 `limit_min > limit_max`、`max_rate < 0`、`mass < 0`），且不留下半份记录；申报过的非零 `max_rate` 会在物件侧真正拦住超限命令（`MOTION_E_LIMIT`），幅值判定对 `INT64_MIN` 单独处理。**申报了却不执行，等于死字段** —— `duration_ns` 曾经就是这样一块装饰。行程上限（`limit_min/limit_max`）目前只做结构校验、尚未在积分处生效；它是作用在**实测位姿**上的约束，与「命令 / 解算 / 实测」三者的分离一起处理
 21. **基座纯净性可被静态断言**：`base/base.c` 里不得出现 `cap`、`limit_min`、`limit_max`、`max_rate`、`mass`、`orientation`、`position`、`described`、`still` 这些名字，由 `make check-purity` 断言。基座一旦理解这些名字，它就开始理解世界，「无状态」也就随之失效 —— 这条不变量因此不是口号，而是一个会失败的门禁
 22. **命令、解算、实测必须分离**：`cmd_motion` 是本物件相对 `frame` 的命令速度；`state.position`、`state.linear`、`state.angular` 是物件相对 `frame` 的实测/自持状态；`object_resolve()` 才给出世界视角。执行层只把本地命令积分进本地位姿，绝不把世界解算结果写回。完整刚体速度逐级按 `v' = Rv + v_F + ω_F × Rr`、`ω' = Rω + ω_F` 复合，位置耦合用实测相对位置；外部改写位姿时清空旧轨迹的积分余数。查询命名同样服从这条边界：`object_commanded_is_zero()` 只说明相对参照系的命令为零，不声称物件在世界中静止
+23. **姿态必须真的是旋转**：非零 `orientation` 在 `object_set_state()` 入口按 `|q|² = 1 ± 1/1024` 校验，非法整份拒绝、一个字段都不写；全零表示「未申报姿态」，按无旋转处理。理由不是洁癖：用 `2q` 旋转会把向量放大两倍，而错误表现成「精度问题」，比直接报错危险得多。**「还没上报」不是「报了错的」**，两者必须分开
+24. **解算失败必须有成因**：`object_resolve()` 返回 `object_resolve_status_t`，区分空指针、目标不存在、参照链断开、成环、链深度超限和 checked 算术溢出。成环与「合法但过长」是两种需要不同修复的现场，此前共用一个 `depth >= MAX` 判定，长链会被误报成环。注意 `OBJECT_RESOLVE_OK` 为 0：把返回值当真值用会让「成功」为假，调用者必须显式比较
 
 ---
 

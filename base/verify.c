@@ -379,15 +379,15 @@ static void verify_frame_resolution(void)
         base_apply(clk, &ev);
 
         check("B resolves to 105 relative to the world",
-              object_resolve(b, r) && r[0] == 105);
+              object_resolve(b, r) == OBJECT_RESOLVE_OK && r[0] == 105);
         check("C resolves through a two-level chain to 107",
-              object_resolve(c, r) && r[0] == 107);
+              object_resolve(c, r) == OBJECT_RESOLVE_OK && r[0] == 107);
 
         /* 相对静止：B 相对 A 取零，解出来就等于 A 的运动 */
         ev = make_event(b, a, 1000000000ULL, 1, 0, 0);
         base_apply(clk, &ev);
         check("still relative to A resolves to A's own motion (100)",
-              object_resolve(b, r) && r[0] == 100);
+              object_resolve(b, r) == OBJECT_RESOLVE_OK && r[0] == 100);
 
         /*
          * 成环：基座能接受（每次只看 frame 这条线是否有效），
@@ -397,14 +397,14 @@ static void verify_frame_resolution(void)
         check("the base accepts a cyclic frame (it cannot see chains)",
               base_apply(clk, &ev) == MOTION_OK);
         check("the object side detects the cycle",
-              !object_resolve(c, r));
+              object_resolve(c, r) == OBJECT_RESOLVE_E_CYCLE);
 
         /* 参照系离开后，链断开，解算必须失败而不是给出旧值 */
         ev = make_event(a, FRAME_WORLD, 1000000000ULL, 1, 100, 0);
         base_apply(clk, &ev);
         object_unplug(a);
         check("a departed frame breaks the chain",
-              !object_resolve(b, r));
+              object_resolve(b, r) == OBJECT_RESOLVE_E_BROKEN_FRAME);
 
         object_unplug(b);
         object_unplug(c);
@@ -460,17 +460,17 @@ static void verify_frame_rotation(void)
         base_apply(clk, &ev);
 
         check("an unrotated frame leaves the motion unchanged (10, 0, 0)",
-              object_resolve(b, r) && r[0] == Q(10) && r[1] == 0);
+              object_resolve(b, r) == OBJECT_RESOLVE_OK && r[0] == Q(10) && r[1] == 0);
 
         /* A 绕 z 轴转 180°：q = {0, 0, 0, 1}，结果应精确为 (-10, 0, 0) */
         set_orientation(a, 0, 0, 0, Q(1));
         check("a frame turned 180 deg about z gives (-10, 0, 0)",
-              object_resolve(b, r) && r[0] == -Q(10) && r[1] == 0 && r[2] == 0);
+              object_resolve(b, r) == OBJECT_RESOLVE_OK && r[0] == -Q(10) && r[1] == 0 && r[2] == 0);
 
         /* A 绕 z 轴转 90°：q = {cos45, 0, 0, sin45}，结果约为 (0, 10, 0) */
         motion_fixed_t c45 = 3037000500LL;   /* 0.70710678 x 2^32 */
         set_orientation(a, c45, 0, 0, c45);
-        bool ok = object_resolve(b, r);
+        bool ok = object_resolve(b, r) == OBJECT_RESOLVE_OK;
         check("a frame turned 90 deg about z gives (0, 10, 0)",
               ok && near(r[0], 0) && near(r[1], Q(10)) && near(r[2], 0));
 
@@ -478,7 +478,7 @@ static void verify_frame_rotation(void)
         ev = make_event(b, a, 1000000000ULL, 3, 0, 0);
         base_apply(clk, &ev);
         check("still relative to a rotated frame stays still",
-              object_resolve(b, r) && r[0] == 0 && r[1] == 0 && r[2] == 0);
+              object_resolve(b, r) == OBJECT_RESOLVE_OK && r[0] == 0 && r[1] == 0 && r[2] == 0);
 
         object_unplug(a);
         object_unplug(b);
@@ -559,7 +559,7 @@ static void verify_execution(void)
 
         motion_fixed_t fr[MOTION_DOF_MAX];
         check("...yet resolves to fast's world velocity",
-              object_resolve(follower, fr) && fr[0] == Q(1));
+              object_resolve(follower, fr) == OBJECT_RESOLVE_OK && fr[0] == Q(1));
 
         /* 落后很久之后只走一步，不会一次补跑几十步 */
         u32 late_st = 0;
@@ -847,7 +847,7 @@ static void verify_dof_and_capability(void)
         for (u8 i = 0; i < MOTION_DOF_MAX; i++)
                 r[i] = 0;
         check("the tail cannot leak through the frame chain",
-              object_resolve(leaf, r) && r[0] == Q(1) && r[1] == 0 &&
+              object_resolve(leaf, r) == OBJECT_RESOLVE_OK && r[0] == Q(1) && r[1] == 0 &&
               r[2] == 0 && r[3] == 0 && r[4] == 0 && r[5] == 0);
 
         object_unplug(leaf);
@@ -1003,7 +1003,7 @@ static void verify_commanded_resolved_measured(void)
         object_set_state(rider, &st);
 
         motion_fixed_t r[MOTION_DOF_MAX];
-        bool ok = object_resolve(rider, r);
+        bool ok = object_resolve(rider, r) == OBJECT_RESOLVE_OK;
         check("the rider's world linear velocity is omega x r = (0, 1, 0)",
               ok && r[0] == 0 && near(r[1], Q(1)) && near(r[2], 0));
         check("the rider's world angular velocity is the turntable's",
@@ -1025,7 +1025,7 @@ static void verify_commanded_resolved_measured(void)
          */
         st.position[0] = Q(2);
         object_set_state(rider, &st);
-        ok = object_resolve(rider, r);
+        ok = object_resolve(rider, r) == OBJECT_RESOLVE_OK;
         check("doubling the measured radius doubles the tangential speed",
               ok && near(r[1], Q(2)));
 
@@ -1052,7 +1052,7 @@ static void verify_commanded_resolved_measured(void)
         check("a carried object accumulates no pose of its own",
               ok && st.position[0] == 0 && st.position[1] == 0);
         check("but its resolved world velocity is the frame's",
-              object_resolve(rider, r) && near(r[0], Q(1)));
+              object_resolve(rider, r) == OBJECT_RESOLVE_OK && near(r[0], Q(1)));
 
         /*
          * 实测速度不再是死字段：执行层推进过之后，state.linear/angular
@@ -1125,6 +1125,132 @@ static void verify_commanded_resolved_measured(void)
         object_unplug(carrier);
 }
 
+/* ------------------------------------------------------------------ */
+/* 第十二部分：姿态合法性与解算失败的成因                              */
+/*                                                                    */
+/* 两条缺陷同源：把「说不清」当成「说完了」。                          */
+/*   1. 非单位四元数被当作旋转使用 —— 用 2q 旋转会得到两倍长的向量，   */
+/*      而错误会伪装成精度问题。                                     */
+/*   2. 断链、成环、链过深、算术溢出共用同一个 false，诊断信息没有     */
+/*      任何可用之处，且成环与「合法但太长」被混为一谈。               */
+/* ------------------------------------------------------------------ */
+
+static void state_zero(object_state_t *st)
+{
+        for (u8 i = 0; i < 3; i++) {
+                st->position[i] = 0;
+                st->linear[i]   = 0;
+                st->angular[i]  = 0;
+        }
+        for (u8 i = 0; i < 4; i++)
+                st->orientation[i] = 0;
+}
+
+static void verify_quaternion_and_resolve_status(void)
+{
+        arch_puts("\n--- pose validity and resolve failure causes ---\n\n");
+
+        wire_t q = object_plug(2, 1000000);
+        object_state_t st;
+        object_state_t back;
+
+        /* ---- 四元数校验 ---- */
+
+        state_zero(&st);
+        st.position[0] = Q(7);
+        check("an all-zero orientation means 'no pose declared' and is accepted",
+              object_set_state(q, &st));
+
+        state_zero(&st);
+        st.orientation[0] = Q(2);
+        check("a scaled quaternion (2,0,0,0) is refused",
+              !object_set_state(q, &st));
+
+        state_zero(&st);
+        st.orientation[0] = Q(1);
+        st.orientation[1] = Q(1);
+        check("a non-unit quaternion (1,1,0,0) is refused",
+              !object_set_state(q, &st));
+
+        state_zero(&st);
+        st.orientation[0] = INT64_MAX;
+        check("a quaternion with a huge component is refused without overflow",
+              !object_set_state(q, &st));
+
+        check("a refused pose leaves the previous state untouched",
+              object_state(q, &back) && back.position[0] == Q(7));
+
+        /* 0.7071 + 0.7071i 是合法的单位四元数 */
+        motion_fixed_t c45 = 3037000500LL;
+        state_zero(&st);
+        st.position[0] = Q(8);
+        st.orientation[0] = c45;
+        st.orientation[3] = c45;
+        check("a properly normalised quaternion is accepted",
+              object_set_state(q, &st));
+        check("an accepted pose reads back",
+              object_state(q, &back) && back.position[0] == Q(8) &&
+              back.orientation[3] == c45);
+
+        object_unplug(q);
+
+        /* ---- 解算失败的成因可区分 ---- */
+
+        motion_fixed_t r[MOTION_DOF_MAX];
+
+        check("resolving a dead wire reports NO_OBJECT",
+              object_resolve(WIRE_NONE, r) == OBJECT_RESOLVE_E_NO_OBJECT);
+
+        wire_t a = object_plug(2, 1000000);
+        check("resolving with a null output reports INVAL",
+              object_resolve(a, 0) == OBJECT_RESOLVE_E_INVAL);
+
+        motion_event_t ev = make_event(a, FRAME_WORLD, 1000000000ULL, 1, 1, 0);
+        base_apply(clk, &ev);
+
+        /* 链断开：参照系离开 */
+        wire_t b = object_plug(2, 1000000);
+        ev = make_event(b, a, 1000000000ULL, 1, 1, 0);
+        base_apply(clk, &ev);
+        object_unplug(a);
+        check("a departed frame reports BROKEN_FRAME",
+              object_resolve(b, r) == OBJECT_RESOLVE_E_BROKEN_FRAME);
+        object_unplug(b);
+
+        /* 成环：两条接线互为参照 */
+        wire_t c1 = object_plug(2, 1000000);
+        wire_t c2 = object_plug(2, 1000000);
+        ev = make_event(c1, c2, 1000000000ULL, 1, 1, 0);
+        base_apply(clk, &ev);
+        ev = make_event(c2, c1, 1000000000ULL, 1, 1, 0);
+        base_apply(clk, &ev);
+        check("a two-object cycle reports CYCLE",
+              object_resolve(c1, r) == OBJECT_RESOLVE_E_CYCLE);
+        object_unplug(c1);
+        object_unplug(c2);
+
+        /* 合法但过长：OBJECT_FRAME_DEPTH_MAX + 2 个物件的直链 */
+        wire_t chain[OBJECT_FRAME_DEPTH_MAX + 2];
+        u32 built = 0;
+
+        for (u32 i = 0; i < OBJECT_FRAME_DEPTH_MAX + 2u; i++) {
+                chain[i] = object_plug(2, 1000000);
+                if (chain[i] == WIRE_NONE)
+                        break;
+                ev = make_event(chain[i], i == 0 ? FRAME_WORLD : chain[i - 1],
+                                1000000000ULL, 1, 1, 0);
+                base_apply(clk, &ev);
+                built++;
+        }
+
+        check("an over-long but acyclic chain reports DEPTH, not CYCLE",
+              built == OBJECT_FRAME_DEPTH_MAX + 2u &&
+              object_resolve(chain[built - 1], r) == OBJECT_RESOLVE_E_DEPTH);
+
+        for (u32 i = 0; i < built; i++)
+                object_unplug(chain[i]);
+}
+
 int base_verify(void)
 {
         failures = 0;
@@ -1141,6 +1267,7 @@ int base_verify(void)
         verify_time_safety();
         verify_dof_and_capability();
         verify_commanded_resolved_measured();
+        verify_quaternion_and_resolve_status();
 
         arch_puts("\n  failures = ");
         arch_putdec((u64)failures);

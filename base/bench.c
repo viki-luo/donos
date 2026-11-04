@@ -269,7 +269,7 @@ static void bench_resolve(void)
 
                 u64 t0 = arch_cycles();
                 for (u32 i = 0; i < RESOLVE_N; i++)
-                        object_resolve(tail, out);
+                        (void)object_resolve(tail, out);
                 u64 cyc = arch_cycles() - t0;
 
                 arch_puts("  object_resolve, chain of ");

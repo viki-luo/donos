@@ -40,6 +40,19 @@
   wrapping endpoints and events from the future are all `MOTION_E_INVAL`
 - **`motion_event_t` 增加 `issued_at_ns` 字段**：结构体成员增至 6 个
   / **`motion_event_t` gains `issued_at_ns`**: six members instead of five
+- **一个接口签名变更**：`void object_set_state(...)` → `bool object_set_state(...)`。
+  姿态在入口校验，非法姿态整份拒绝，调用者必须能知道
+  / **one signature change**: `void object_set_state(...)` becomes
+  `bool object_set_state(...)`. The pose is validated on entry and an invalid
+  pose is refused as a whole, so the caller has to be able to learn that
+- **一个解算接口的返回类型变更**：`bool object_resolve(...)` →
+  `object_resolve_status_t object_resolve(...)`。断链、成环、链过深、算术溢出
+  从此可以区分；注意 `OBJECT_RESOLVE_OK` 为 0，因此**不能**再把返回值直接
+  当真值使用
+  / **one return-type change**: `bool object_resolve(...)` becomes
+  `object_resolve_status_t object_resolve(...)`. A broken frame, a cycle, an
+  over-long chain and arithmetic overflow are now distinguishable; note that
+  `OBJECT_RESOLVE_OK` is 0, so the result must **not** be used as a boolean
 - **一个查询接口重命名**：`object_is_still(wire)` →
   `object_commanded_is_zero(wire)`。旧名字错误暗示它判断世界中的实际静止；
   实际上它只读取相对 `frame` 的当前命令。参照系本身运动时，命令为零的物件
@@ -71,6 +84,32 @@
 
 ### Fixed / 修复
 
+- **非单位四元数被当作旋转使用**：`object_set_state()` 接受任意姿态，
+  `rotate3()` 只把**全零**四元数当作「无旋转」。于是 (2,0,0,0) 或 (1,1,0,0)
+  这样的输入会被当成合法旋转，把向量缩放两倍或 √2 倍 —— 错误表现成精度问题。
+  现在姿态在入口按 `|q|² = 1 ± 1/1024` 校验，非法姿态**整份拒绝**、一个字段
+  都不写入；全零仍表示「未申报姿态」，按无旋转处理，因为「还没上报」不是
+  「报了错的」
+  / **non-unit quaternions were used as rotations**: `object_set_state()`
+  accepted any orientation and `rotate3()` treated only the **all-zero**
+  quaternion as "no rotation". An input like (2,0,0,0) or (1,1,0,0) was taken
+  as a valid rotation and scaled vectors by 2 or by sqrt(2) — an error that
+  disguises itself as precision loss. A pose is now validated on entry against
+  `|q|^2 = 1 +/- 1/1024` and an invalid one is **refused as a whole**, writing no
+  field at all; all-zero still means "no pose declared" and maps to no rotation,
+  because "not reported yet" is not "reported something wrong"
+- **成环与「链过深」共用同一个失败**：`object_resolve()` 只用
+  `depth >= OBJECT_FRAME_DEPTH_MAX` 一个判定，于是一条合法但较长的链会被
+  报成环，而真实成环与「需要缩短链」两种现场无法区分。现在记下走过的接线，
+  重复出现才是 `OBJECT_RESOLVE_E_CYCLE`；超过深度上限是
+  `OBJECT_RESOLVE_E_DEPTH`；断链、目标不存在、空指针、算术溢出各有独立状态
+  / **cycles and "chain too deep" shared one failure**: `object_resolve()` used
+  a single `depth >= OBJECT_FRAME_DEPTH_MAX` test, so a legal but long chain was
+  reported as a cycle, and the two situations needed different fixes but looked
+  identical. Visited wires are now recorded and only a repeat reports
+  `OBJECT_RESOLVE_E_CYCLE`; exceeding the limit reports
+  `OBJECT_RESOLVE_E_DEPTH`; a broken frame, a missing target, a null pointer and
+  arithmetic overflow each have their own status
 - **命令、世界解算与实测状态混为一体**：执行层此前把
   `object_resolve()` 得到的世界速度积分进相对 `frame` 的 `state.position`，
   参照系自身的位移会凭空变成物件自己的相对位移；`state.linear` 与
@@ -239,6 +278,19 @@
 
 ### Added / 新增
 
+- **姿态合法性与解算成因验证段**（`base/verify.c` 第十二部分，双架构各 12 条）：
+  全零姿态被接受为「未申报」、(2,0,0,0) 被拒、(1,1,0,0) 被拒、`INT64_MAX`
+  分量被拒且不触发溢出、被拒姿态不扰动已有状态、合法单位四元数被接受并可读回、
+  死接线报 `NO_OBJECT`、空指针报 `INVAL`、离开的参照系报 `BROKEN_FRAME`、
+  两物件互指报 `CYCLE`、合法但过长的链报 `DEPTH` 而**不是** `CYCLE`
+  / **pose validity and resolve-failure section** (`base/verify.c`, part 12,
+  12 assertions per architecture): an all-zero pose is accepted as undeclared,
+  (2,0,0,0) refused, (1,1,0,0) refused, an `INT64_MAX` component refused without
+  overflow, a refused pose leaving the previous state untouched, a proper unit
+  quaternion accepted and read back, a dead wire reporting `NO_OBJECT`, a null
+  pointer reporting `INVAL`, a departed frame reporting `BROKEN_FRAME`, two
+  objects pointing at each other reporting `CYCLE`, and an over-long acyclic
+  chain reporting `DEPTH` rather than `CYCLE`
 - **命令 / 解算 / 实测分离验证段**（`base/verify.c` 第十一部分，双架构）：
   验证转动参照系的位置耦合项 `ω × r`、世界角速度继承、实测半径改变切向速度、
   相对静止物件不累计自己的位姿但仍解算出参照系的世界速度、执行层更新

@@ -126,8 +126,12 @@ bool object_capability(wire_t w, object_capability_t *out);
  *
  * 调用会清空积分余数（carry）：余数属于被改写前的那条轨迹，留着它
  * 会让新轨迹凭空多出一个取决于历史的零头。
+ *
+ * 姿态在这里校验：非零 orientation 必须是单位四元数（|q|² 落在
+ * 1 ± 1/1024），否则整份状态被拒绝、一个字段都不写入，返回 false。
+ * 全零 orientation 表示「未申报姿态」，按无旋转处理，是合法输入。
  */
-void object_set_state(wire_t w, const object_state_t *st);
+bool object_set_state(wire_t w, const object_state_t *st);
 
 /*
  * 读取物件当前的位姿与速度（参照系内的实测值）。接线无效返回 false。
@@ -136,8 +140,29 @@ bool object_state(wire_t w, object_state_t *out);
 
 /* ---- 参照系由物件自己解（设计决定 15，方案 A）---- */
 
-/* 参照链的最大深度。超过即视为成环。 */
+/* 参照链的最大深度。重复接线报告成环；超过此深度报告链过深。 */
 #define OBJECT_FRAME_DEPTH_MAX 8
+
+/*
+ * 解算结果。每一项都是可区分的真实现场，而不是笼统的「失败」：
+ *   E_NO_OBJECT     目标接线当前没有物件
+ *   E_INVAL         输出指针为空
+ *   E_BROKEN_FRAME  参照系已离开，链断开
+ *   E_CYCLE         frame 链绕回自己（重复接线）
+ *   E_DEPTH         链合法但超过 OBJECT_FRAME_DEPTH_MAX
+ *   E_OVERFLOW      checked 算术层拒绝某个中间值
+ * 成环与过深必须分开：此前两者共用深度上限，任何长链都被报成环，
+ * 诊断信息直接说谎。
+ */
+typedef enum {
+        OBJECT_RESOLVE_OK = 0,
+        OBJECT_RESOLVE_E_INVAL = -1,
+        OBJECT_RESOLVE_E_NO_OBJECT = -2,
+        OBJECT_RESOLVE_E_BROKEN_FRAME = -3,
+        OBJECT_RESOLVE_E_CYCLE = -4,
+        OBJECT_RESOLVE_E_DEPTH = -5,
+        OBJECT_RESOLVE_E_OVERFLOW = -6,
+} object_resolve_status_t;
 
 /*
  * 把物件「相对 frame 的运动」解成「相对世界的运动」。
@@ -145,7 +170,8 @@ bool object_state(wire_t w, object_state_t *out);
  * 沿参照链逐级直读参照系物件的运动 —— 这是物件间直连，不经过基座。
  * 基座不能做这件事：解 frame 要读另一个物件的运动，那是世界信息。
  *
- * 参照系已离开、链断开或成环时返回 false：基座只校验 frame 这条线
+ * 返回 object_resolve_status_t，明确区分：参数无效、目标不存在、参照链断开、
+ * 成环、链深度超限和 checked 算术溢出。基座只校验 frame 这条线
  * 当下是否有效，发现不了环，环只能由物件侧发现。
  *
  * 逐级复合的是完整的刚体速度（twist），不是简单的向量相加：
@@ -159,7 +185,8 @@ bool object_state(wire_t w, object_state_t *out);
  *
  * out[0..2] 是世界线速度（m/s），out[3..5] 是世界角速度（rad/s）。
  */
-bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX]);
+object_resolve_status_t object_resolve(
+        wire_t w, motion_fixed_t out[MOTION_DOF_MAX]);
 
 /* ---- 执行模型（设计决定 16）：在基座之外推进各物件的运动环 ---- */
 

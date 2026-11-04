@@ -350,11 +350,71 @@ bool object_capability(wire_t w, object_capability_t *out)
         return true;
 }
 
-void object_set_state(wire_t w, const object_state_t *st)
+/*
+ * 四元数是否可当作旋转使用。
+ *
+ * 全零不算「非法」，而是「未申报姿态」：物件从没调用过
+ * object_set_state 时 orientation 全是零，那不是一条错误的旋转，
+ * 而是没有旋转可报。把它判成错误，会让每一个还没上报姿态的物件
+ * 都无法参与解算 —— 那不是严格，那是把一个正常状态当故障。
+ *
+ * 非零就必须是单位四元数：|q|² 必须落在 1 ± 1/1024 之内。取平方和
+ * 而不是逐个比较，是因为整体缩放的四元数（例如 2q）方向正确但不是
+ * 旋转 —— 用它旋转会得到两倍长度的向量，而错误会伪装成精度问题。
+ * 容差 1/1024 是给 Q32.32 存储舍入留的余量，不是给「大致归一」留的。
+ */
+#define Q_ONE        4294967296LL          /* 1.0 in Q32.32 */
+#define Q_UNIT_TOL   (Q_ONE / 1024)
+
+static bool quaternion_is_rotation(const motion_fixed_t q[4], bool *undeclared)
+{
+        bool all_zero = true;
+        motion_fixed_t sum = 0;
+
+        for (u8 i = 0; i < 4; i++)
+                if (q[i] != 0)
+                        all_zero = false;
+
+        if (undeclared != 0)
+                *undeclared = all_zero;
+        if (all_zero)
+                return true;
+
+        for (u8 i = 0; i < 4; i++) {
+                motion_fixed_t sq;
+
+                if (fixed_mul_checked(q[i], q[i], &sq) != FIXED_OK ||
+                    fixed_add_checked(sum, sq, &sum) != FIXED_OK)
+                        return false;
+        }
+
+        motion_fixed_t dev;
+
+        if (fixed_sub_checked(sum, Q_ONE, &dev) != FIXED_OK)
+                return false;
+        if (dev == INT64_MIN)
+                return false;
+        if (dev < 0)
+                dev = -dev;
+
+        return dev <= Q_UNIT_TOL;
+}
+
+bool object_set_state(wire_t w, const object_state_t *st)
 {
         object_t *o = find_by_wire(w);
         if (o == 0 || st == 0)
-                return;
+                return false;
+
+        /*
+         * 姿态在入口校验，且**整体拒绝**：非法四元数不写入任何字段。
+         *
+         * 只写位置、丢掉姿态是不行的 —— 调用者以为自己上报了一份位姿，
+         * 而模型里留下的是「位置是新的、姿态是旧的」这种从未存在过的
+         * 组合。要么整份收下，要么整份退回，与能力申报同一条纪律。
+         */
+        if (!quaternion_is_rotation(st->orientation, 0))
+                return false;
 
         for (u8 i = 0; i < 3; i++) {
                 o->state.position[i] = st->position[i];
@@ -374,6 +434,8 @@ void object_set_state(wire_t w, const object_state_t *st)
          */
         for (u8 i = 0; i < 3; i++)
                 o->carry[i] = 0;
+
+        return true;
 }
 
 bool object_state(wire_t w, object_state_t *out)
@@ -412,8 +474,8 @@ bool object_state(wire_t w, object_state_t *out)
  *
  * 所有定点运算都经过 checked 层。任一中间值超出 Q32.32 表示范围时
  * 返回 false，调用者不得使用部分计算结果。
- * 全零四元数暂时仍视为「未申报姿态」，按无旋转处理；其语义将在
- * frame/四元数阶段进一步收紧。
+ * 全零四元数表示「未申报姿态」，按无旋转处理；非零姿态在
+ * object_set_state() 入口已校验为单位四元数，因此这里不再重复校验。
  */
 static bool rotate3(const motion_fixed_t q[4], motion_fixed_t v[3])
 {
@@ -493,11 +555,14 @@ static bool cross3_checked(const motion_fixed_t a[3],
         return true;
 }
 
-bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX])
+object_resolve_status_t object_resolve(wire_t w,
+                                       motion_fixed_t out[MOTION_DOF_MAX])
 {
         object_t *o = find_by_wire(w);
-        if (o == 0 || out == 0)
-                return false;
+        if (o == 0)
+                return OBJECT_RESOLVE_E_NO_OBJECT;
+        if (out == 0)
+                return OBJECT_RESOLVE_E_INVAL;
 
         /*
          * 循环不变量：v、wv、r 三者都表达在「当前参照系」的坐标里，
@@ -507,6 +572,14 @@ bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX])
         motion_fixed_t wv[3];
         motion_fixed_t r[3];
         bool r_nonzero = false;
+
+        /*
+         * 走过的接线。成环与「链太深」是两件事，但它们此前共用同一个
+         * `depth >= MAX` 判定，于是任何长得合法但太深的链都被报成环 ——
+         * 诊断信息直接说谎，而且真实成环与需要缩短链的现场无法区分。
+         * 记住走过的接线，重复出现才是环。
+         */
+        wire_t seen[OBJECT_FRAME_DEPTH_MAX];
 
         for (u8 i = 0; i < 3; i++) {
                 v[i]  = o->cmd_motion[i];         /* 命令：相对 frame 的线速度 */
@@ -519,11 +592,17 @@ bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX])
         wire_t frame = o->frame;
         for (u32 depth = 0; frame != FRAME_WORLD; depth++) {
                 if (depth >= OBJECT_FRAME_DEPTH_MAX)
-                        return false;           /* 成环或链过深 */
+                        return OBJECT_RESOLVE_E_DEPTH;  /* 合法但过长 */
+
+                for (u32 k = 0; k < depth; k++)
+                        if (seen[k] == frame)
+                                return OBJECT_RESOLVE_E_CYCLE;
+
+                seen[depth] = frame;
 
                 object_t *f = find_by_wire(frame);
                 if (f == 0)
-                        return false;           /* 参照系已离开 */
+                        return OBJECT_RESOLVE_E_BROKEN_FRAME;
 
                 const motion_fixed_t *q = f->state.orientation;
 
@@ -532,9 +611,9 @@ bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX])
                  * 参照系的 zero 四元数由 rotate3 当作「无旋转」处理。
                  */
                 if (!rotate3(q, v) || !rotate3(q, wv))
-                        return false;
+                        return OBJECT_RESOLVE_E_OVERFLOW;
                 if (r_nonzero && !rotate3(q, r))
-                        return false;
+                        return OBJECT_RESOLVE_E_OVERFLOW;
 
                 /*
                  * 位置耦合项 ω_F × r。
@@ -551,7 +630,7 @@ bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX])
 
                 const motion_fixed_t *wf = &f->cmd_motion[3];
                 if (r_nonzero && !cross3_checked(wf, r, tang))
-                        return false;
+                        return OBJECT_RESOLVE_E_OVERFLOW;
 
                 for (u8 i = 0; i < 3; i++) {
                         motion_fixed_t sum;
@@ -559,10 +638,10 @@ bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX])
                         if (fixed_add_checked(v[i], tang[i], &sum) != FIXED_OK ||
                             fixed_add_checked(sum, f->cmd_motion[i], &v[i])
                                     != FIXED_OK)
-                                return false;
+                                return OBJECT_RESOLVE_E_OVERFLOW;
 
                         if (fixed_add_checked(wv[i], wf[i], &wv[i]) != FIXED_OK)
-                                return false;
+                                return OBJECT_RESOLVE_E_OVERFLOW;
                 }
 
                 /*
@@ -572,7 +651,7 @@ bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX])
                 for (u8 i = 0; i < 3; i++) {
                         if (fixed_add_checked(r[i], f->state.position[i],
                                               &r[i]) != FIXED_OK)
-                                return false;
+                                return OBJECT_RESOLVE_E_OVERFLOW;
                         if (r[i] != 0)
                                 r_nonzero = true;
                 }
@@ -584,7 +663,7 @@ bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX])
                 out[i]     = v[i];
                 out[3 + i] = wv[i];
         }
-        return true;
+        return OBJECT_RESOLVE_OK;
 }
 
 /* ------------------------------------------------------------------ */
@@ -631,7 +710,7 @@ static void object_step(object_t *o)
          * 解算仍然要跑：链断掉或成环时物件没有可用的参照系，
          * 此时位姿保持不动（这一步仍算执行过）。
          */
-        if (object_resolve(o->wire, r)) {
+        if (object_resolve(o->wire, r) == OBJECT_RESOLVE_OK) {
                 motion_fixed_t next_position[3];
                 motion_fixed_t next_carry[3];
                 u8 count = o->dof < 3 ? o->dof : 3;
