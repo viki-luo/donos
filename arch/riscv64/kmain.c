@@ -77,15 +77,25 @@ void kernel_main(u64 hartid, u64 dtb)
         for (u8 i = 0; i < MOTION_DOF_MAX; i++)
                 ev.motion[i] = 0;
 
+        /*
+         * 提交时刻由调用者给出。
+         *
+         * 必须是执行层时间轴上的「现在」，不能用 arch_ticks() * STEP_NS：
+         * ARCH 的节拍计数从 0 起，而自检/基准已经把执行时钟推到了 500 ms 之后，
+         * 两条时间轴直接混用就是一次真实的时间回退，事件会被正确地判为
+         * 「发出于未来」而拒绝。
+         */
+        u64 submit_at = object_now_ns();
+
         ev.wire = arm;                  /* arm 相对世界 3 m/s（决定 18） */
         ev.frame = FRAME_WORLD;
         ev.motion[0] = (motion_fixed_t)3 << 32;
-        base_apply(&ev);
+        base_apply(submit_at, &ev);
 
         ev.wire = hand;                 /* hand 相对 arm 静止 */
         ev.frame = arm;
         ev.motion[0] = 0;
-        base_apply(&ev);
+        base_apply(submit_at, &ev);
 
         bool reported = false;
 
@@ -113,10 +123,23 @@ void kernel_main(u64 hartid, u64 dtb)
                 }
 
                 arch_irq_enable();
+
+                /*
+                 * 只在执行层自己的时间轴上推进：object_now_ns() 是上一次
+                 * 被接受的时刻，加上本循环实测的节拍增量必然严格前进。
+                 * ARCH 的节拍计数从 0 起，与自检/基准推到的时刻不是同一条
+                 * 时间轴，直接拿它当执行时刻就是一次真实的时间回退。
+                 */
+                u64 advance = (ticks - last) * STEP_NS;
                 last = ticks;
 
-                /* 传绝对节拍时刻，与 x86_64 一致 */
-                object_run(ticks * STEP_NS);
+                u32 stepped = 0;
+
+                if (object_run(object_now_ns() + advance, &stepped) !=
+                    OBJECT_RUN_OK) {
+                        arch_puts("  [live] execution clock refused this "
+                                  "instant; no object was advanced\n");
+                }
 
                 if (!reported && (ticks - start) * STEP_NS >= 1000000000ULL) {
                         object_state_t st;
@@ -138,8 +161,9 @@ void kernel_main(u64 hartid, u64 dtb)
                         }
                         arch_puts("  (still relative to arm)\n");
                         if (object_step_count(arm) != ticks - start)
-                                arch_puts("  note: one step may be missed at a tick boundary;\n"
-                                          "        a late run steps once and does not catch up (decision 16)\n");
+                                arch_puts("  note: one tick fewer than ticks elapsed, because the\n"
+                                          "        first sighting only schedules (no free step),\n"
+                                          "        and a late run does not catch up (decision 16)\n");
                         arch_puts("\n[live] objects keep moving; the base stays idle\n");
                         reported = true;
                 }

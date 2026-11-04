@@ -39,12 +39,11 @@ typedef struct {
 static object_t objects[OBJECT_MAX];
 
 /*
- * 物件侧的执行时钟：最近一次 object_run 的时刻。
- *
- * 它有两个用途：运动环排期（决定 16）与提交时的新鲜度判定（决定 10 修订）。
- * 基座不计时，所以时间只能存在物件侧。调用者必须给出单调递增的时刻。
+ * 执行层只保存调度时钟，用于拒绝 object_run() 时间回退。
+ * 命令新鲜度不读这个值，而使用 base_apply() 显式传入的提交时刻。
  */
-static u64 exec_now_ns;
+static u64 last_run_ns;
+static bool run_clock_started;
 
 /* 把一段内存清零，不依赖 libc（freestanding） */
 static void zero(void *p, u64 n)
@@ -60,7 +59,8 @@ static void zero(void *p, u64 n)
  */
 void object_init(void)
 {
-        exec_now_ns = 0;
+        last_run_ns = 0;
+        run_clock_started = false;
         for (u64 i = 0; i < OBJECT_MAX; i++) {
                 objects[i].in_use = false;
                 objects[i].wire = WIRE_NONE;
@@ -102,9 +102,8 @@ static object_t *find_by_wire(wire_t w)
 wire_t object_plug(u32 unit, u64 period_ns)
 {
         /*
-         * 周期上限：积分用 64 位整数做 v * period_ns，若周期本身
-         * 超过 2^63/2^32 秒（约 68 年），任何非零速度都会溢出。
-         * 拒绝而不是截断 —— 申报一个跑不动的周期是物件侧的错。
+         * 周期上限属于执行模型契约。算术安全由 checked fixed-point 层
+         * 独立保证，调度时间加法则在 object_run() 中逐次检查回绕。
          */
         if (period_ns > OBJECT_PERIOD_NS_MAX)
                 return WIRE_NONE;
@@ -161,10 +160,12 @@ void object_unplug(wire_t w)
  * 包括接之后继续沿轨道运动。
  *
  * 新鲜度判定（设计决定 10 修订）在这里做，而不是在基座里：
- * 事件只在 [issued_at_ns, issued_at_ns + duration_ns] 窗口内可被接，
- * 判定需要一个「现在」，而基座不计时。物件层的时间源就是执行时钟。
+ * 事件只在 [issued_at_ns, issued_at_ns + duration_ns] 窗口内可被接受。
+ * now_ns 是事件本次到达入口的提交时刻，只在本次调用中使用；基座与
+ * 物件都不把它保存成世界时钟，也不复用 object_run() 的旧调度节拍。
  */
-motion_status_t object_submit(wire_t w, const motion_event_t *ev)
+motion_status_t object_submit(wire_t w, u64 now_ns,
+                              const motion_event_t *ev)
 {
         object_t *o = find_by_wire(w);
         if (o == 0)
@@ -177,10 +178,10 @@ motion_status_t object_submit(wire_t w, const motion_event_t *ev)
         if (deadline < ev->issued_at_ns)
                 return MOTION_E_INVAL;            /* 窗口端点回绕 */
 
-        if (ev->issued_at_ns > exec_now_ns)
+        if (ev->issued_at_ns > now_ns)
                 return MOTION_E_INVAL;            /* 未来事件：时间来源异常 */
 
-        if (exec_now_ns > deadline)
+        if (now_ns > deadline)
                 return MOTION_E_DEADLINE;         /* 过期：拒绝陈旧命令 */
 
         o->dof = ev->dof;
@@ -477,32 +478,84 @@ static void object_step(object_t *o)
         o->step_count++;
 }
 
-u32 object_run(u64 now_ns)
+static bool time_add_checked(u64 a, u64 b, u64 *out)
 {
-        exec_now_ns = now_ns;   /* 同时是提交新鲜度的判定时钟 */
-        u32 stepped = 0;
+        if (out == 0 || a > UINT64_MAX - b)
+                return false;
+        *out = a + b;
+        return true;
+}
 
+object_run_status_t object_run(u64 now_ns, u32 *stepped)
+{
+        u64 next_due[OBJECT_MAX];
+
+        if (stepped == 0)
+                return OBJECT_RUN_E_INVAL;
+        *stepped = 0;
+
+        if (run_clock_started && now_ns < last_run_ns)
+                return OBJECT_RUN_E_CLOCK_ROLLBACK;
+
+        /*
+         * 第一遍只计算排期，不修改任何物件。这样即使后面的物件发生
+         * 时间回绕，整个 object_run 也不会留下前半张表已经推进的状态。
+         */
+        for (u64 i = 0; i < OBJECT_MAX; i++) {
+                object_t *o = &objects[i];
+
+                next_due[i] = o->next_due_ns;
+                if (!o->in_use || o->period_ns == 0)
+                        continue;
+
+                if (o->next_due_ns == 0) {
+                        if (!time_add_checked(now_ns, o->period_ns,
+                                              &next_due[i]))
+                                return OBJECT_RUN_E_TIME_OVERFLOW;
+                        continue;       /* 首次只排期，不凭空积分一个周期 */
+                }
+
+                if (now_ns < o->next_due_ns)
+                        continue;
+
+                if (!time_add_checked(o->next_due_ns, o->period_ns,
+                                      &next_due[i]))
+                        return OBJECT_RUN_E_TIME_OVERFLOW;
+
+                /* 落后时不补跑：从当前时刻重新排下一次。 */
+                if (next_due[i] <= now_ns &&
+                    !time_add_checked(now_ns, o->period_ns, &next_due[i]))
+                        return OBJECT_RUN_E_TIME_OVERFLOW;
+        }
+
+        /* 第二遍才提交排期与运动步，前一遍已证明所有时间加法安全。 */
         for (u64 i = 0; i < OBJECT_MAX; i++) {
                 object_t *o = &objects[i];
 
                 if (!o->in_use || o->period_ns == 0)
-                        continue;               /* 未申报周期：不推进 */
-                if (o->next_due_ns != 0 && now_ns < o->next_due_ns)
-                        continue;               /* 还没到期 */
-
-                object_step(o);
-                stepped++;
+                        continue;
 
                 if (o->next_due_ns == 0) {
-                        o->next_due_ns = now_ns + o->period_ns;
-                } else {
-                        o->next_due_ns += o->period_ns;
-                        /* 落后太多就不补跑，直接从现在重新排 */
-                        if (o->next_due_ns <= now_ns)
-                                o->next_due_ns = now_ns + o->period_ns;
+                        o->next_due_ns = next_due[i];
+                        continue;
                 }
+
+                if (now_ns < o->next_due_ns)
+                        continue;
+
+                object_step(o);
+                o->next_due_ns = next_due[i];
+                (*stepped)++;
         }
-        return stepped;
+
+        last_run_ns = now_ns;
+        run_clock_started = true;
+        return OBJECT_RUN_OK;
+}
+
+u64 object_now_ns(void)
+{
+        return last_run_ns;
 }
 
 u32 object_step_count(wire_t w)

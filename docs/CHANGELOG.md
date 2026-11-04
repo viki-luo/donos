@@ -40,6 +40,18 @@
   wrapping endpoints and events from the future are all `MOTION_E_INVAL`
 - **`motion_event_t` 增加 `issued_at_ns` 字段**：结构体成员增至 6 个
   / **`motion_event_t` gains `issued_at_ns`**: six members instead of five
+- **两个接口签名变更**：`base_apply(const motion_event_t *)` →
+  `base_apply(u64 now_ns, const motion_event_t *)`；
+  `u32 object_run(u64 now_ns)` → `object_run_status_t object_run(u64 now_ns, u32 *stepped)`。
+  调用者必须提供提交时刻，并检查执行层是否接受了这个时刻；新增只读
+  `u64 object_now_ns(void)` 供调用者在同一条时间轴上取「现在」
+  / **two signature changes**: `base_apply(const motion_event_t *)` becomes
+  `base_apply(u64 now_ns, const motion_event_t *)`, and
+  `u32 object_run(u64 now_ns)` becomes
+  `object_run_status_t object_run(u64 now_ns, u32 *stepped)`. Callers must
+  supply the submission instant and check whether the execution layer accepted
+  it; a read-only `u64 object_now_ns(void)` lets a caller read "now" on that
+  same timeline
 
 ### Fixed / 修复
 
@@ -96,16 +108,83 @@
   / **`object_plug()` refuses over-long periods**: `OBJECT_PERIOD_NS_MAX`
   (1 s) is an explicit execution-model bound; arithmetic safety no longer
   relies on it and is enforced independently by the checked fixed-point layer
+- **新鲜度判定用的是上一次 `object_run` 的旧节拍**：`object_submit()` 读的
+  「现在」是执行时钟 `exec_now_ns`，只在 `object_run()` 里更新。两次运行之间
+  提交的命令，无论实际迟到多久，看到的都是同一个过期时刻 —— 一个早该过期的
+  命令可以无限期地被接受，而一个刚刚发出的命令却可能被判为「发出于未来」。
+  现在提交时刻由调用者显式给出：`base_apply(now_ns, ev)` /
+  `object_submit(w, now_ns, ev)`；基座不保存它，物件也不缓存它
+  / **freshness judged against a stale execution beat**: `object_submit()`
+  read `exec_now_ns`, which only `object_run()` ever updated — so every command
+  submitted between two runs was judged against the same obsolete instant.
+  A command could be accepted long after it should have expired. The submission
+  instant is now an explicit argument: `base_apply(now_ns, ev)` and
+  `object_submit(w, now_ns, ev)`; neither the base nor the object stores it
+- **执行时钟可回退**：`object_run(now_ns)` 此前不检查 `now_ns` 是否小于
+  上一次的值，回退时每个物件仍会各走一步，时间上「倒退」了而
+  运动上「前进」了。现返回 `object_run_status_t`，回退返回
+  `OBJECT_RUN_E_CLOCK_ROLLBACK` 且**不推进任何物件**
+  / **the execution clock could run backwards**: `object_run(now_ns)` never
+  compared `now_ns` with the previous instant, so a rollback still stepped
+  every object — time went back, motion went forward. It now returns
+  `object_run_status_t` and refuses a rollback with
+  `OBJECT_RUN_E_CLOCK_ROLLBACK` without advancing any object
+- **调度时间加法回绕**：`now_ns + period_ns` 与 `next_due_ns + period_ns`
+  直接相加，接近 `UINT64_MAX` 时会回绕成一个很小的值，下一次到期就落在过去，
+  运动环退化为「每拍都跑」。现全部经 `time_add_checked()`，回绕返回
+  `OBJECT_RUN_E_TIME_OVERFLOW`，并以**两遍制**提交：第一遍只算排期，
+  第二遍才写状态，因此失败不会留下前半张表已推进的状态
+  / **scheduling additions wrapped around**: `now_ns + period_ns` and
+  `next_due_ns + period_ns` were plain additions; near `UINT64_MAX` they
+  wrapped to a tiny value, putting the next due instant in the past and
+  degenerate a motion loop into "step on every call". Both now go through
+  `time_add_checked()` and report `OBJECT_RUN_E_TIME_OVERFLOW`. Commit is
+  two-phase — the first pass only computes deadlines, the second writes state —
+  so a refusal cannot leave half the table advanced
+- **物件首次被看见时凭空积分一个周期**：`next_due_ns == 0` 的物件被当作
+  「已到期」，插上就立刻走一步，位置里因此多出一段从未经过的时间（约
+  100 Hz 下 3 m/s 即 3 cm 的免费位移）。首次现在只排期，不积分
+  / **an object was integrated for free the first time it was seen**: a
+  `next_due_ns == 0` object counted as due and stepped immediately at plug-in.
+  The first sighting now only schedules; it does not integrate
+- **实机循环混用两条时间轴**：`kmain.c` 把 `arch_ticks() * NS_PER_TICK`
+  直接喂给执行层，而自检/基准已把执行时钟推到 500 ms 之后。ARCH 节拍计数从
+  0 起，两个时间轴一错位就是一次**真实的时间回退**，执行层正确地拒绝它，
+  物件从此不再前进。新增只读 `object_now_ns()`，实机循环改为在其上加
+  本循环实测的节拍增量，提交时刻同样取自执行层时间轴
+  / **two different timelines mixed in the live loop**: `kmain.c` fed
+  `arch_ticks() * NS_PER_TICK` straight to the execution layer, while
+  verification and benchmarks had already pushed the execution clock past
+  500 ms. The ARCH tick counter starts at zero, so the mismatch is a **real
+  time rollback**; the new guard correctly refused it, and nothing moved
+  again. A read-only `object_now_ns()` was added and the live loop now advances
+  the execution clock by the measured tick delta; submission instants come from
+  that same timeline
 
 ### Added / 新增
 
 - **新鲜度验证段**（`base/verify.c`，第七部分）：零长度窗口拒绝、过期事件
   返回 `MOTION_E_DEADLINE`、端点回绕拒绝、边界 `now == deadline` 接受、
-  未来事件拒绝 —— `MOTION_E_DEADLINE` 由此第一次成为可达路径
+  未来事件拒绝 —— `MOTION_E_DEADLINE` 由此第一次成为可达路径。该段只使用
+  自己的局部提交时刻，**不再依赖「前面的测试把执行时钟推到了约 106 ms」**，
+  因此结论不随测试顺序漂移
   / **freshness verification section** (`base/verify.c`, part 7): zero-length
   window refused, expired event returns `MOTION_E_DEADLINE`, wrapping endpoint
   refused, boundary `now == deadline` accepted, event from the future refused —
-  `MOTION_E_DEADLINE` is reachable for the first time
+  `MOTION_E_DEADLINE` is reachable for the first time. The section uses only its
+  own local submission instants and **no longer depends on earlier tests having
+  pushed the execution clock to about 106 ms**, so the verdict does not drift
+  with test order
+- **执行时钟安全验证段**（`base/verify.c`，第九部分）：正向推进被接受、
+  回退被拒且不推进任何物件、同一时刻不算回退、插上后首次 `object_run`
+  只排期不步进、下一周期边界恰好一步、空步数指针被拒、排期加法回绕被拒、
+  被拒之后时钟仍可继续使用。全部在**两个架构**上实测
+  / **execution-clock safety section** (`base/verify.c`, part 9): forward
+  advance accepted, rollback refused without advancing anything, the same
+  instant is not a rollback, the first `object_run` after plug-in only
+  schedules, the next period boundary performs exactly one step, a null step
+  counter is refused, a wrapping scheduling addition is refused, and the clock
+  remains usable afterwards. Measured on **both architectures**
 
 ### Changed / 变更
 

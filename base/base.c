@@ -55,7 +55,8 @@ void base_init(void)
  * 基座不认识物件内部是什么。它只把事件递过去，由物件自己的运动能力
  * 去执行。这个函数由各架构的物件接入层提供。
  */
-extern motion_status_t object_submit(wire_t w, const motion_event_t *ev);
+extern motion_status_t object_submit(wire_t w, u64 now_ns,
+                                     const motion_event_t *ev);
 
 /* ------------------------------------------------------------------ */
 /* 接线                                                                */
@@ -126,7 +127,7 @@ bool base_wire_valid(wire_t w)
 /* 原语                                                                */
 /* ------------------------------------------------------------------ */
 
-motion_status_t base_apply(const motion_event_t *ev)
+motion_status_t base_apply(u64 now_ns, const motion_event_t *ev)
 {
         if (ev == 0)
                 return MOTION_E_INVAL;
@@ -146,8 +147,9 @@ motion_status_t base_apply(const motion_event_t *ev)
                 return MOTION_E_NO_FRAME;
 
         /*
-         * 把事件交给物件。基座到此为止 —— 不缓存、不排队、不计时。
-         * 事件到期后基座不做任何事：物件按该事件继续运动。
+         * 把事件和本次提交时刻交给物件。基座到此为止：不缓存、不排队、
+         * 不保存时钟。新鲜度检查只使用这次调用的 now_ns；事件一旦接受，
+         * 窗口闭合也不会撤销物件已经自持的轨迹。
          */
-        return object_submit(ev->wire, ev);
+        return object_submit(ev->wire, now_ns, ev);
 }

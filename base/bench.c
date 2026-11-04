@@ -29,6 +29,17 @@
 static int bench_failures;
 
 /*
+ * Submission instant used by the benchmark harness.
+ *
+ * Every event built here carries a full-width freshness window
+ * (issued_at_ns = 0, duration_ns = UINT64_MAX), so what is being measured is
+ * the mechanism's cost and never the freshness decision. The instant is a
+ * fixed literal rather than whatever the execution clock happens to hold, so
+ * a measurement cannot silently turn into a rejection.
+ */
+static u64 clk;
+
+/*
  * Every wire a benchmark creates is recorded here and released when that
  * section ends. Without this, an earlier section would leave the object
  * table full and the next one would measure a table-full rejection
@@ -194,7 +205,7 @@ static void bench_apply(void)
 
         u64 t0 = arch_cycles();
         for (u32 i = 0; i < APPLY_N; i++)
-                base_apply(&ev);
+                base_apply(clk, &ev);
         u64 accepted = arch_cycles() - t0;
 
         /* Rejection path: the target wire does not exist. */
@@ -202,7 +213,7 @@ static void bench_apply(void)
                                         1000000000ULL, 3, 1);
         t0 = arch_cycles();
         for (u32 i = 0; i < APPLY_N; i++)
-                base_apply(&bad);
+                base_apply(clk, &bad);
         u64 rejected = arch_cycles() - t0;
 
         arch_puts("  base_apply accepted : ");
@@ -233,7 +244,7 @@ static wire_t build_chain(u32 hops)
                         return WIRE_NONE;
 
                 motion_event_t ev = make_event(w, prev, 1000000000ULL, 3, 1);
-                base_apply(&ev);
+                base_apply(clk, &ev);
                 set_turned(w);
 
                 prev = w;
@@ -292,7 +303,7 @@ static u32 bench_worst_tick(void)
             }
             placed++;
             motion_event_t ev = make_event(w, prev, 1000000000ULL, 6, 1);
-            base_apply(&ev);
+            base_apply(clk, &ev);
             set_turned(w);
             prev = w;
         }
@@ -306,12 +317,21 @@ static u32 bench_worst_tick(void)
         }
 
         u64 now = 1000000000ULL;
+        u32 stepped = 0;
         u64 t0 = arch_cycles();
+
         for (u32 i = 0; i < TICK_N; i++) {
                 now += 10000000ULL;
-                object_run(now);
+                object_run(now, &stepped);
         }
         u64 cyc = (arch_cycles() - t0) / TICK_N;
+
+        /*
+         * The first run of a newly built set only schedules, so exactly one
+         * of TICK_N runs is a scheduling pass rather than an integration
+         * pass. Say so instead of letting the average imply 2000 full runs.
+         */
+        arch_puts("  (of these runs, 1 is the first sighting: schedule only)\n");
 
         arch_puts("  full run over ");
         arch_putdec(placed);
@@ -413,7 +433,7 @@ static void bench_stress(void)
         bool alive = true;
         for (u32 i = 0; i < n; i++) {
                 motion_event_t ev = make_event(held[i], FRAME_WORLD, 1000ULL, 1, 1);
-                if (base_apply(&ev) != MOTION_OK)
+                if (base_apply(clk, &ev) != MOTION_OK)
                         alive = false;
         }
         check("a full table leaves existing wires intact", alive);
@@ -428,7 +448,7 @@ static void bench_stress(void)
 
         motion_event_t to_dead = make_event(victim, FRAME_WORLD, 1000ULL, 1, 1);
         check("the base rejects motion on a dead handle",
-              base_apply(&to_dead) == MOTION_E_NO_WIRE);
+              base_apply(clk, &to_dead) == MOTION_E_NO_WIRE);
 
         /* Forged handles of every awkward shape must be refused, not crash. */
         wire_t forged[7];
@@ -443,7 +463,7 @@ static void bench_stress(void)
         bool refused = true;
         for (u8 i = 0; i < 7u; i++) {
                 motion_event_t ev = make_event(forged[i], FRAME_WORLD, 1000ULL, 1, 1);
-                if (base_apply(&ev) != MOTION_E_NO_WIRE)
+                if (base_apply(clk, &ev) != MOTION_E_NO_WIRE)
                         refused = false;
                 if (base_wire_valid(forged[i]))
                         refused = false;

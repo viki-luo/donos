@@ -88,11 +88,12 @@ void object_unplug(wire_t w);
 /*
  * 基座把已经校验过的事件递到这里。物件接住它前先做新鲜度判定
  * （设计决定 10 修订）：事件只在 [issued_at_ns, issued_at_ns + duration_ns]
- * 窗口内可被接受，判定时钟是执行层最近一次 object_run 的时刻。
- * 过期返回 MOTION_E_DEADLINE，未来事件与零窗口返回 MOTION_E_INVAL。
- * 接受之后物件自己负责后续 —— 持续沿该事件运动，不需要基座续喂。
+ * 窗口内可被接受，判定时刻 now_ns 是该事件本次到达入口的真实提交时刻，
+ * 不得复用上一次 object_run 的旧节拍。过期返回 MOTION_E_DEADLINE，
+ * 未来事件与零窗口返回 MOTION_E_INVAL。接受之后物件持续沿该事件运动。
  */
-motion_status_t object_submit(wire_t w, const motion_event_t *ev);
+motion_status_t object_submit(wire_t w, u64 now_ns,
+                              const motion_event_t *ev);
 
 /* ---- 物件自述与自持（R8）：只对大脑可见，基座无路径 ---- */
 
@@ -129,16 +130,33 @@ bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX]);
 
 /* ---- 执行模型（设计决定 16）：在基座之外推进各物件的运动环 ---- */
 
+typedef enum {
+        OBJECT_RUN_OK = 0,
+        OBJECT_RUN_E_CLOCK_ROLLBACK = -1,
+        OBJECT_RUN_E_TIME_OVERFLOW = -2,
+        OBJECT_RUN_E_INVAL = -3,
+} object_run_status_t;
+
 /*
- * 推进所有到期物件的运动环一步，返回本次推进的物件数。
+ * 推进所有到期物件的运动环一步，并把本次推进数写到 stepped。
  *
- * now_ns 由调用者（架构层的时钟）给出：基座不持有时间，执行层也不自己
- * 读硬件。该时刻同时成为物件侧的执行时钟，供提交时判定事件新鲜度，
- * 因此调用者必须给出单调递增的时刻。每个物件按自己在到达时申报的
- * period_ns 被推进；period_ns 为 0 的物件不会被推进。落后时不补跑，
- * 从当前时刻重新排期。
+ * now_ns 由调用者（架构层时钟）给出。执行层拒绝时间回退，并对所有
+ * now_ns + period_ns 调度加法做回绕检查。物件第一次被执行层看见时只
+ * 建立 next_due_ns，不积分一个尚未经过的完整周期。落后时不补跑，
+ * 而是从当前时刻重新排期。提交新鲜度使用 base_apply 的显式 now_ns，
+ * 与此调度时钟互不混用。
  */
-u32 object_run(u64 now_ns);
+object_run_status_t object_run(u64 now_ns, u32 *stepped);
+
+/*
+ * 执行层当前所在的时刻，即最近一次被接受的 object_run 的 now_ns。
+ *
+ * 存在的理由：调用者手里的硬件节拍计数与执行层的时间轴不是同一条。
+ * 若把「节拍计数 × 每拍纳秒」直接喂给 object_run，两者一旦错位就是
+ * 一次真实的时间回退，执行层会拒绝，物件从此不再前进。调用者应当以
+ * 本值为基准加上自己测得的时间增量，从而始终单调前进。
+ */
+u64 object_now_ns(void);
 
 /* 该物件的运动环累计被推进了多少步。 */
 u32 object_step_count(wire_t w);

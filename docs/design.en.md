@@ -114,8 +114,19 @@ The boundaries are written down, one by one:
 | `now == deadline` | accepted (the moment the window closes is still inside it) |
 | `now > deadline` | `MOTION_E_DEADLINE` (refused, never executed) |
 
-"Now" comes from the object side — the most recent `object_run(now_ns)`. The base does not keep time, so the
-deadline test can only be made there. That is not a compromise; it follows directly from being stateless.
+**"Now" is the submission instant, passed explicitly by the caller:**
+
+```c
+motion_status_t base_apply(u64 now_ns, const motion_event_t *ev);
+motion_status_t object_submit(wire_t w, u64 now_ns, const motion_event_t *ev);
+```
+
+The base does not keep time, so the deadline test can only be made on the object side. That is not a
+compromise; it follows directly from being stateless. But the "now" used by that test **must be the instant the
+command reached the entry point**, not the execution layer's last scheduled beat: for commands submitted between
+two `object_run()` calls, judging against a stale beat lets a long-expired command be accepted indefinitely while
+a freshly issued one can be classified as "from the future". Neither the base nor the object stores that instant —
+it is just an argument to this call.
 
 ### 3.1.2 The shape of a motion event
 
@@ -365,7 +376,7 @@ Just as IP is the narrow waist of the network: everything passes over it, yet ap
 13. **Everything is a motion object**; a brain is just an ordinary wire with **no "brain slot"**. The base is symmetric, grants no authority and judges nothing; brains can be stacked arbitrarily. **The base is the only non-object** — not a thing in the world, but the world's motion-control function
 14. **Wire handles stay stable across slot reuse**: encoded as `(generation << 16) | slot` with a monotonic generation. A departed handle never comes back to life — otherwise, after a hot-plug, an old brain would command whatever new object took the same slot
 15. **Objects resolve their own frame (option A)**: an object walks the frame chain and reads each frame object's motion directly — **objects may connect to each other directly**, never through the base. The base only checks that the `frame` wire is valid right now; it cannot see the chain and therefore cannot detect cycles. Cycles and broken chains are detected and rejected on the object side
-16. **The execution model lives outside the base**: an execution layer advances each object's motion loop at the `period_ns` the object declared on arrival; time is supplied by the caller (the architecture clock), and the base neither schedules nor keeps time. Objects with no declared period (`period_ns = 0`) are never advanced; a late run does not catch up but reschedules from the current time
+16. **The execution model lives outside the base**: an execution layer advances each object's motion loop at the `period_ns` the object declared on arrival; time is supplied by the caller (the architecture clock), and the base neither schedules nor keeps time. Objects with no declared period (`period_ns = 0`) are never advanced; a late run does not catch up but reschedules from the current time. Four time rules: **(a) time only moves forward** — a `now_ns` below the last accepted instant returns `OBJECT_RUN_E_CLOCK_ROLLBACK` and advances nothing; **(b) scheduling additions never wrap** — both `now_ns + period_ns` and `next_due_ns + period_ns` are checked and report `OBJECT_RUN_E_TIME_OVERFLOW`; **(c) two-phase commit** — the first pass only computes deadlines and the second writes state, so a refusal can never leave half the table advanced; **(d) the first sighting only schedules** — an object is not integrated the first time the execution layer sees it, because stepping at plug-in would count time that never elapsed. A caller's hardware tick counter is not the execution timeline: read `object_now_ns()` and add the measured delta
 17. **About a wire the base knows only whether it is alive**: `base_arrive()` takes no arguments, and each wiring-table slot holds only a generation and an in-use flag. Self-declared properties such as unit and control period are kept by the object and read directly by the brain through `object_declared()`, never through the base
 18. **Motion units are frozen**: `motion[0..2]` are linear velocity in m/s and `motion[3..5]` angular velocity in rad/s, all Q32.32. An object integrates velocity into pose over its declared `period_ns`: `position += v * period_ns`. Integration uses **remainder carry**, not re-rounding every step — per-step truncation errs in one constant direction, accumulates linearly with step count, and so effectively lets the period rewrite the velocity. Every fixed-point add, subtract, multiply, rotation, frame-chain accumulation and position update must pass through checked arithmetic; an out-of-range result fails explicitly and never relies on signed C wraparound. Device-native units (degrees, encoder ticks, millimetres) are converted by the object's adapter layer and never enter the base's channel; "the same event produces the same world velocity on objects with different periods" is therefore a verifiable property, not a convention
 

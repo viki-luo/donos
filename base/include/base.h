@@ -112,17 +112,18 @@ typedef enum {
         MOTION_E_NO_WIRE   = -2,  /* 目标接线不存在或已断开 */
         MOTION_E_NO_FRAME  = -3,  /* 参照系接线不存在或已断开 */
         MOTION_E_NO_OBJECT = -4,  /* 接线当前没有物件 */
-        MOTION_E_DEADLINE  = -5,  /* 事件已过期：发出时刻 + 窗口早于执行时钟 */
+        MOTION_E_DEADLINE  = -5,  /* 事件已过期：发出时刻 + 窗口早于提交时刻 */
 } motion_status_t;
 
 /*
  * 施加运动 —— 基座唯一的原语。
  *
- * 成功返回 MOTION_OK。基座把事件交给目标物件，不在自身保存任何东西。
- * 基座不计时：新鲜度窗口由物件层按执行时钟判定（设计决定 10 修订），
- * 过期事件以 MOTION_E_DEADLINE 拒绝；一旦接受，物件持续沿该事件运动。
+ * now_ns 是事件到达本原语的提交时刻，由调用者提供。基座只把它作为
+ * 本次调用的参数传给物件，不保存时间；因此新鲜度判断不会错误复用
+ * 上一次 object_run 的旧节拍。过期事件以 MOTION_E_DEADLINE 拒绝；
+ * 一旦接受，物件持续沿该事件运动。
  */
-motion_status_t base_apply(const motion_event_t *ev);
+motion_status_t base_apply(u64 now_ns, const motion_event_t *ev);
 
 /* ------------------------------------------------------------------ */
 /* 接线                                                                */
