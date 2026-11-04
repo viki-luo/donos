@@ -40,6 +40,15 @@
   wrapping endpoints and events from the future are all `MOTION_E_INVAL`
 - **`motion_event_t` 增加 `issued_at_ns` 字段**：结构体成员增至 6 个
   / **`motion_event_t` gains `issued_at_ns`**: six members instead of five
+- **一个查询接口重命名**：`object_is_still(wire)` →
+  `object_commanded_is_zero(wire)`。旧名字错误暗示它判断世界中的实际静止；
+  实际上它只读取相对 `frame` 的当前命令。参照系本身运动时，命令为零的物件
+  在世界中仍然运动
+  / **one query API rename**: `object_is_still(wire)` becomes
+  `object_commanded_is_zero(wire)`. The old name incorrectly implied measured
+  stillness in the world; the query only reads the current command relative to
+  `frame`. An object with a zero command still moves in the world when its frame
+  moves
 - **一个接口签名变更**：`void object_describe(...)` →
   `bool object_describe(...)`。申报可能被校验拒绝，调用者必须能知道 ——
   静默拒绝正是死字段的来源
@@ -62,6 +71,37 @@
 
 ### Fixed / 修复
 
+- **命令、世界解算与实测状态混为一体**：执行层此前把
+  `object_resolve()` 得到的世界速度积分进相对 `frame` 的 `state.position`，
+  参照系自身的位移会凭空变成物件自己的相对位移；`state.linear` 与
+  `state.angular` 又从未由执行层更新。现在内部命令明确保存为 `cmd_motion`，
+  执行层只积分本物件相对 `frame` 的命令速度并更新实测速度字段，世界视角只由
+  `object_resolve()` 返回，不写回本地状态
+  / **command, world resolution, and measured state were conflated**: the
+  executor integrated the world velocity returned by `object_resolve()` into a
+  `state.position` relative to `frame`, causing the frame's displacement to
+  become the object's own relative displacement; `state.linear` and
+  `state.angular` were never updated. Commands are now held explicitly as
+  `cmd_motion`; the executor integrates only the object's command relative to
+  `frame` and updates measured velocity fields, while the world view is returned
+  only by `object_resolve()` and never written back into local state
+- **刚体速度解算遗漏 `ω × r`**：旧实现只旋转并相加线速度和角速度，挂在
+  自转参照系半径 `r` 处的物件不会获得切向速度。现在逐级旋转线速度、角速度
+  与实测相对位置，并以 checked Q32.32 算术加入 `ω_F × r`；参照系原点位移
+  也随链上移，避免更高层围绕错误原点旋转
+  / **rigid-body twist resolution omitted `omega x r`**: the old code only
+  rotated and added linear and angular velocities, so an object at radius `r`
+  on a rotating frame acquired no tangential velocity. Resolution now rotates
+  linear velocity, angular velocity, and measured relative position at each
+  level, adds `omega_F x r` with checked Q32.32 arithmetic, and carries frame
+  origins upward so higher levels rotate about the correct origin
+- **`object_set_state()` 保留旧轨迹的积分余数**：外部改写位姿后，下一条轨迹
+  会继承改写前尚未补齐的 sub-LSB 零头，使相同新位姿和相同新命令因历史不同
+  得出不同结果。现在改写状态时清空三个 `carry` 分量
+  / **`object_set_state()` kept the previous trajectory's integration carry**:
+  after an external pose write, the next trajectory inherited sub-LSB remainder
+  from the old one, making identical new pose and command depend on history.
+  All three carry components are now cleared when state is written
 - **事件的 `dof` 尾部会进入模型并顺参照链累加**：`object_submit()` 照抄
   全部 6 个 `motion[]` 分量，而事件只声明了前 `dof` 个 —— 尾部可能是上一条
   命令的残值或未初始化的栈内容。`object_resolve()` 又按 6 轴累加参照链，
@@ -199,6 +239,17 @@
 
 ### Added / 新增
 
+- **命令 / 解算 / 实测分离验证段**（`base/verify.c` 第十一部分，双架构）：
+  验证转动参照系的位置耦合项 `ω × r`、世界角速度继承、实测半径改变切向速度、
+  相对静止物件不累计自己的位姿但仍解算出参照系的世界速度、执行层更新
+  `state.linear` / `state.angular`，以及外部改写位姿后旧积分余数不会泄漏进新轨迹
+  / **commanded / resolved / measured separation section** (`base/verify.c`,
+  part 11, on both architectures): verifies the rotating-frame coupling term
+  `omega x r`, inherited world angular velocity, measured radius controlling
+  tangential speed, a relatively still object keeping zero local pose while
+  resolving to its frame's world velocity, executor updates to `state.linear`
+  and `state.angular`, and stale integration carry being cleared after an
+  externally written pose
 - **新鲜度验证段**（`base/verify.c`，第七部分）：零长度窗口拒绝、过期事件
   返回 `MOTION_E_DEADLINE`、端点回绕拒绝、边界 `now == deadline` 接受、
   未来事件拒绝 —— `MOTION_E_DEADLINE` 由此第一次成为可达路径。该段只使用

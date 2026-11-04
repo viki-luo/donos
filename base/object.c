@@ -19,7 +19,14 @@ typedef struct {
         wire_t         wire;
 
         /* --- 以下全部是物件自己的状态，基座一律看不到 --- */
-        motion_fixed_t motion[MOTION_DOF_MAX];
+
+        /*
+         * 命令：本物件「相对 frame」的速度（线 0..2、角 3..5）。
+         * 它不是世界速度 —— 世界速度要沿参照链解算（object_resolve），
+         * 而解算结果不写回这里。命令与解算必须分开存：把它们合并成一个
+         * 字段，就等于让「我被告知什么」和「我在世界里怎么动」互相覆盖。
+         */
+        motion_fixed_t cmd_motion[MOTION_DOF_MAX];
         wire_t         frame;
         u64            duration_ns;   /* 接时的新鲜度窗口（记录用） */
         u8             dof;
@@ -30,7 +37,13 @@ typedef struct {
         u64            next_due_ns;   /* 下一次运动环到期时刻；0 = 尚未起步 */
         u32            step_count;
 
-        /* --- R8：物件自述与自持 --- */
+        /*
+         * 实测/自持位姿。三者都在本物件自己的参照系里表达：
+         *   position    相对 frame 的位置
+         *   linear      相对 frame 的线速度（实测）
+         *   angular     相对 frame 的角速度（实测）
+         * 世界视角由 object_resolve() 给，不在这份状态里。
+         */
         object_state_t      state;
         object_capability_t cap;
         bool                described;
@@ -76,7 +89,7 @@ void object_init(void)
                 objects[i].next_due_ns = 0;
                 objects[i].step_count = 0;
                 for (u8 k = 0; k < MOTION_DOF_MAX; k++)
-                        objects[i].motion[k] = 0;
+                        objects[i].cmd_motion[k] = 0;
                 zero(&objects[i].state, sizeof(objects[i].state));
                 zero(&objects[i].cap, sizeof(objects[i].cap));
                 objects[i].described = false;
@@ -130,7 +143,7 @@ wire_t object_plug(u32 unit, u64 period_ns)
                 objects[i].next_due_ns = 0;
                 objects[i].step_count = 0;
                 for (u8 k = 0; k < MOTION_DOF_MAX; k++)
-                        objects[i].motion[k] = 0;
+                        objects[i].cmd_motion[k] = 0;
                 zero(&objects[i].state, sizeof(objects[i].state));
                 zero(&objects[i].cap, sizeof(objects[i].cap));
                 objects[i].described = false;
@@ -231,7 +244,7 @@ motion_status_t object_submit(wire_t w, u64 now_ns,
          * 因此能悄悄推动整条链的角速度。
          */
         for (u8 i = 0; i < MOTION_DOF_MAX; i++)
-                o->motion[i] = i < ev->dof ? ev->motion[i] : 0;
+                o->cmd_motion[i] = i < ev->dof ? ev->motion[i] : 0;
         o->event_count++;
 
         return MOTION_OK;
@@ -241,14 +254,22 @@ motion_status_t object_submit(wire_t w, u64 now_ns,
 /* 自检用的只读查询                                                    */
 /* ------------------------------------------------------------------ */
 
-bool object_is_still(wire_t w)
+/*
+ * 本物件被告知的运动是否全零。
+ *
+ * 名字刻意不叫 object_is_still：它读的是**命令**，相对 frame 表达。
+ * 「命令为零」只说明「本物件不相对 frame 动」，不说明它在世界里静止 ——
+ * 参照系自己在动，它照样在世界里走（静止是一种相对的运动）。
+ * 世界的动与不动只能由 object_resolve() 的结果判断，而那属于大脑。
+ */
+bool object_commanded_is_zero(wire_t w)
 {
         object_t *o = find_by_wire(w);
         if (o == 0)
                 return false;
 
         for (u8 i = 0; i < o->dof; i++)
-                if (o->motion[i] != 0)
+                if (o->cmd_motion[i] != 0)
                         return false;
         return true;
 }
@@ -264,7 +285,7 @@ motion_fixed_t object_motion(wire_t w, u8 i)
         object_t *o = find_by_wire(w);
         if (o == 0 || i >= MOTION_DOF_MAX)
                 return 0;
-        return o->motion[i];
+        return o->cmd_motion[i];
 }
 
 /* ------------------------------------------------------------------ */
@@ -342,6 +363,17 @@ void object_set_state(wire_t w, const object_state_t *st)
         }
         for (u8 i = 0; i < 4; i++)
                 o->state.orientation[i] = st->orientation[i];
+
+        /*
+         * 位姿被人为改写之后，旧的积分余数必须丢掉。
+         *
+         * 余数是「上一条轨迹还没补上的零头」，它属于被改写前的那个位置。
+         * 留着它，下一次积分会把它加到新位置上 —— 新轨迹凭空多出
+         * 一个不足最低位的偏移，而且这个偏移取决于改写前跑了多久，
+         * 于是「同样的命令、同样的位置」给出不同的结果。
+         */
+        for (u8 i = 0; i < 3; i++)
+                o->carry[i] = 0;
 }
 
 bool object_state(wire_t w, object_state_t *out)
@@ -437,14 +469,52 @@ static bool rotate3(const motion_fixed_t q[4], motion_fixed_t v[3])
         return true;
 }
 
+/*
+ * 三维叉积，全程 checked：ω × r 的两个乘积之差在定点下同样会越界。
+ *   t0 = a1 b2 - a2 b1
+ *   t1 = a2 b0 - a0 b2
+ *   t2 = a0 b1 - a1 b0
+ */
+static bool cross3_checked(const motion_fixed_t a[3],
+                           const motion_fixed_t b[3],
+                           motion_fixed_t out[3])
+{
+        static const u8 li[3] = { 1, 2, 0 };   /* 被减项的下标 */
+        static const u8 ri[3] = { 2, 0, 1 };
+
+        for (u8 i = 0; i < 3; i++) {
+                motion_fixed_t p, q;
+
+                if (fixed_mul_checked(a[li[i]], b[ri[i]], &p) != FIXED_OK ||
+                    fixed_mul_checked(a[ri[i]], b[li[i]], &q) != FIXED_OK ||
+                    fixed_sub_checked(p, q, &out[i]) != FIXED_OK)
+                        return false;
+        }
+        return true;
+}
+
 bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX])
 {
         object_t *o = find_by_wire(w);
         if (o == 0 || out == 0)
                 return false;
 
-        for (u8 i = 0; i < MOTION_DOF_MAX; i++)
-                out[i] = o->motion[i];
+        /*
+         * 循环不变量：v、wv、r 三者都表达在「当前参照系」的坐标里，
+         * 其中 r 是本物件相对当前参照系原点的位置。
+         */
+        motion_fixed_t v[3];
+        motion_fixed_t wv[3];
+        motion_fixed_t r[3];
+        bool r_nonzero = false;
+
+        for (u8 i = 0; i < 3; i++) {
+                v[i]  = o->cmd_motion[i];         /* 命令：相对 frame 的线速度 */
+                wv[i] = o->cmd_motion[3 + i];     /* 命令：相对 frame 的角速度 */
+                r[i]  = o->state.position[i];     /* 实测：相对 frame 的位置 */
+                if (r[i] != 0)
+                        r_nonzero = true;
+        }
 
         wire_t frame = o->frame;
         for (u32 depth = 0; frame != FRAME_WORLD; depth++) {
@@ -455,24 +525,64 @@ bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX])
                 if (f == 0)
                         return false;           /* 参照系已离开 */
 
+                const motion_fixed_t *q = f->state.orientation;
+
                 /*
-                 * out 是在参照系 f 的局部坐标下表达的运动：先按 f 的姿态
-                 * 转到 f 的上一级坐标，再叠加 f 自身的运动。
-                 * 线运动（0..2）与角运动（3..5）都是三维向量，各转一次。
+                 * 先把本级三个量按参照系姿态转到它的上一级坐标。
+                 * 参照系的 zero 四元数由 rotate3 当作「无旋转」处理。
                  */
-                if (!rotate3(f->state.orientation, &out[0]) ||
-                    !rotate3(f->state.orientation, &out[3]))
+                if (!rotate3(q, v) || !rotate3(q, wv))
+                        return false;
+                if (r_nonzero && !rotate3(q, r))
                         return false;
 
-                for (u8 i = 0; i < MOTION_DOF_MAX; i++) {
-                        motion_fixed_t combined;
+                /*
+                 * 位置耦合项 ω_F × r。
+                 *
+                 * 少了这一项，「挂在转动的参照系上的物件」就只会跟着平移，
+                 * 不会被转出去：参照系以 1 rad/s 自转、物件在半径 1 m 处，
+                 * 它相对世界的线速度里必须有 1 m/s 的切向分量。此前只做
+                 * 「旋转命令 + 叠加参照系命令」，这个分量整个丢失。
+                 *
+                 * r 用**实测**位置而不是命令：耦合项取决于物件实际待在
+                 * 哪里，不取决于它被告知该往哪儿走。
+                 */
+                motion_fixed_t tang[3] = { 0, 0, 0 };
 
-                        if (fixed_add_checked(out[i], f->motion[i],
-                                              &combined) != FIXED_OK)
+                const motion_fixed_t *wf = &f->cmd_motion[3];
+                if (r_nonzero && !cross3_checked(wf, r, tang))
+                        return false;
+
+                for (u8 i = 0; i < 3; i++) {
+                        motion_fixed_t sum;
+
+                        if (fixed_add_checked(v[i], tang[i], &sum) != FIXED_OK ||
+                            fixed_add_checked(sum, f->cmd_motion[i], &v[i])
+                                    != FIXED_OK)
                                 return false;
-                        out[i] = combined;
+
+                        if (fixed_add_checked(wv[i], wf[i], &wv[i]) != FIXED_OK)
+                                return false;
                 }
+
+                /*
+                 * 本级原点相对上一级原点也有一段位移，跟着一起上移。
+                 * 不累加它，上一级的旋转就会绕着错误的原点转。
+                 */
+                for (u8 i = 0; i < 3; i++) {
+                        if (fixed_add_checked(r[i], f->state.position[i],
+                                              &r[i]) != FIXED_OK)
+                                return false;
+                        if (r[i] != 0)
+                                r_nonzero = true;
+                }
+
                 frame = f->frame;
+        }
+
+        for (u8 i = 0; i < 3; i++) {
+                out[i]     = v[i];
+                out[3 + i] = wv[i];
         }
         return true;
 }
@@ -484,9 +594,9 @@ bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX])
 /* ------------------------------------------------------------------ */
 
 /*
- * 物件的一步运动环：把解算出的相对世界速度积分进位置。
+ * 物件的一步运动环：把本物件相对 frame 的命令速度积分进相对位姿。
  *
- * motion 是速度（设计决定 18）：一步积分「速度 × 自述周期」，
+ * cmd_motion 是速度（设计决定 18）：一步积分「速度 × 自述周期",
  * 与周期长短无关地逼近同一世界速度。落后时不补跑（决定 16），
  * 因此这里也只积分一个周期，不积实际流失的时间。
  *
@@ -510,6 +620,17 @@ static void object_step(object_t *o)
 {
         motion_fixed_t r[MOTION_DOF_MAX];
 
+        /*
+         * 解算在这里的作用是**参照链存活检查**，不是取速度来源。
+         *
+         * 积分必须用本物件自己相对 frame 的命令速度：它推进的是自己
+         * 相对参照系的位姿。若改成把解算出的世界速度积分进一个相对
+         * 参照系的 position，量纲就错了 —— 参照系自己在动时，物件的
+         * 相对位姿会凭空长出参照系的位移。
+         *
+         * 解算仍然要跑：链断掉或成环时物件没有可用的参照系，
+         * 此时位姿保持不动（这一步仍算执行过）。
+         */
         if (object_resolve(o->wire, r)) {
                 motion_fixed_t next_position[3];
                 motion_fixed_t next_carry[3];
@@ -524,7 +645,8 @@ static void object_step(object_t *o)
                 for (u8 i = 0; i < count; i++) {
                         motion_fixed_t delta;
 
-                        if (fixed_velocity_step_checked(r[i], o->period_ns,
+                        if (fixed_velocity_step_checked(o->cmd_motion[i],
+                                                        o->period_ns,
                                                         o->carry[i], &delta,
                                                         &next_carry[i]) != FIXED_OK ||
                             fixed_add_checked(o->state.position[i], delta,
@@ -541,6 +663,17 @@ static void object_step(object_t *o)
                         }
                 }
         }
+
+        /*
+         * 实测速度跟着命令走：参考实现里物件的控制环就是它自己，
+         * 于是「刚被命令的速度」就是「当前实测的速度」。
+         * 不写这两个字段，它们就永远是零 —— 又一处死字段。
+         */
+        for (u8 i = 0; i < 3; i++) {
+                o->state.linear[i]  = o->cmd_motion[i];
+                o->state.angular[i] = o->cmd_motion[3 + i];
+        }
+
         o->step_count++;
 }
 

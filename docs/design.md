@@ -379,6 +379,7 @@ position[3]   orientation[4]   motion[6]   frame   duration_ns   carry[3]   dof 
 19. **声明之外不进入模型**：`dof` 是命令的权威边界。事件只在 `motion[0..dof-1]` 上有分量，接受时把 `dof` 之外的分量归零；能力申报只在 `i < cap.dof` 的轴上有效，其余轴清零。理由是同一条：尾部往往是上一条命令的残值或未初始化的栈内容，而参照链按 6 轴累加，一个 `dof = 1` 的物件因此能把「没被命令的角速度」加进子物件的世界运动。**没被声明的东西不是数据，是噪声**，模型不该读它
 20. **申报即承诺**：物件申报的能力会被校验，非法申报**整体拒绝**（`dof > 6`、有效轴上 `limit_min > limit_max`、`max_rate < 0`、`mass < 0`），且不留下半份记录；申报过的非零 `max_rate` 会在物件侧真正拦住超限命令（`MOTION_E_LIMIT`），幅值判定对 `INT64_MIN` 单独处理。**申报了却不执行，等于死字段** —— `duration_ns` 曾经就是这样一块装饰。行程上限（`limit_min/limit_max`）目前只做结构校验、尚未在积分处生效；它是作用在**实测位姿**上的约束，与「命令 / 解算 / 实测」三者的分离一起处理
 21. **基座纯净性可被静态断言**：`base/base.c` 里不得出现 `cap`、`limit_min`、`limit_max`、`max_rate`、`mass`、`orientation`、`position`、`described`、`still` 这些名字，由 `make check-purity` 断言。基座一旦理解这些名字，它就开始理解世界，「无状态」也就随之失效 —— 这条不变量因此不是口号，而是一个会失败的门禁
+22. **命令、解算、实测必须分离**：`cmd_motion` 是本物件相对 `frame` 的命令速度；`state.position`、`state.linear`、`state.angular` 是物件相对 `frame` 的实测/自持状态；`object_resolve()` 才给出世界视角。执行层只把本地命令积分进本地位姿，绝不把世界解算结果写回。完整刚体速度逐级按 `v' = Rv + v_F + ω_F × Rr`、`ω' = Rω + ω_F` 复合，位置耦合用实测相对位置；外部改写位姿时清空旧轨迹的积分余数。查询命名同样服从这条边界：`object_commanded_is_zero()` 只说明相对参照系的命令为零，不声称物件在世界中静止
 
 ---
 
@@ -395,5 +396,5 @@ position[3]   orientation[4]   motion[6]   frame   duration_ns   carry[3]   dof 
 - [x] riscv64 定时器中断：CLINT 经 SBI TIME 扩展（EID 0x54494D45）编程，S 态经 `stvec` 处理陷阱累加节拍；主循环 `wfi` 等中断，与 x86_64 的 PIT 语义一致
 - [ ] riscv64 运行时热插拔（virt 根总线不支持弹出）
 - [ ] 上层大脑的落地与大脑热插拔
-- [ ] `limit_min` / `limit_max` 在积分处生效（目前仅结构校验）：它是作用在实测位姿上的约束，与「命令 / 解算 / 实测」的分离一并处理
+- [ ] `limit_min` / `limit_max` 在积分处生效（目前仅结构校验）：命令 / 解算 / 实测已经分离，但行程限制的越界策略（钳位、拒绝整步或报告故障）仍需在物件侧明确
 - [ ] 命名

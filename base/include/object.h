@@ -118,10 +118,20 @@ bool object_describe(wire_t w, const object_capability_t *cap);
  */
 bool object_capability(wire_t w, object_capability_t *out);
 
-/* 物件更新自己的位姿与速度（由物件自己的控制环调用）。 */
+/*
+ * 物件更新自己的位姿与速度（由物件自己的控制环调用）。
+ *
+ * state 里的 position/linear/angular 全部在**本物件自己的参照系**里表达，
+ * 不是世界坐标；世界视角由 object_resolve() 给出。
+ *
+ * 调用会清空积分余数（carry）：余数属于被改写前的那条轨迹，留着它
+ * 会让新轨迹凭空多出一个取决于历史的零头。
+ */
 void object_set_state(wire_t w, const object_state_t *st);
 
-/* 读取物件当前的位姿与速度。接线无效返回 false。 */
+/*
+ * 读取物件当前的位姿与速度（参照系内的实测值）。接线无效返回 false。
+ */
 bool object_state(wire_t w, object_state_t *out);
 
 /* ---- 参照系由物件自己解（设计决定 15，方案 A）---- */
@@ -138,8 +148,16 @@ bool object_state(wire_t w, object_state_t *out);
  * 参照系已离开、链断开或成环时返回 false：基座只校验 frame 这条线
  * 当下是否有效，发现不了环，环只能由物件侧发现。
  *
- * 每升一级，先按参照系的姿态四元数把运动（线 0..2、角 3..5）旋转到上一级
- * 坐标，再叠加参照系自身的运动。未申报姿态（全零四元数）视为无旋转。
+ * 逐级复合的是完整的刚体速度（twist），不是简单的向量相加：
+ *   1. 按参照系姿态把本级的线速度、角速度、相对位置一起转到上一级坐标；
+ *   2. 位置耦合项 ω_F × r 计入线速度 —— 挂在自转参照系上的物件会被
+ *      「转出去」，少了这一项它只会跟着平移；
+ *   3. 叠加参照系自身的线速度与角速度；
+ *   4. 本级原点相对上一级原点的位移也一起上移，否则上一级会绕错原点转。
+ * 其中 r 取**实测**位置（state.position），不取命令 —— 耦合项取决于物件
+ * 实际待在哪里。未申报姿态（全零四元数）视为无旋转。
+ *
+ * out[0..2] 是世界线速度（m/s），out[3..5] 是世界角速度（rad/s）。
  */
 bool object_resolve(wire_t w, motion_fixed_t out[MOTION_DOF_MAX]);
 
@@ -184,8 +202,15 @@ bool object_declared(wire_t w, u32 *unit, u64 *period_ns);
 
 /* ---- 只读查询（自检与调试用）---- */
 
-/* 该物件当前是否相对其参照系静止（所有有效分量为零）。 */
-bool object_is_still(wire_t w);
+/*
+ * 本物件**被告知**的运动是否全零（相对其参照系，所有有效分量为零）。
+ *
+ * 名字不叫 is_still 是有意的：它读的是命令，不是世界里的运动。
+ * 「命令为零」只说「本物件不相对 frame 动」；参照系自己在动时，
+ * 它照样在世界里走 —— 静止是一种相对的运动，而这句话的另一半是
+ * 「相对谁」。世界视角的动与不动要用 object_resolve() 判断。
+ */
+bool object_commanded_is_zero(wire_t w);
 
 /* 该物件累计收到过多少个事件。 */
 u32 object_event_count(wire_t w);

@@ -46,7 +46,7 @@ run_qemu() {
 
 run_x86_64() {
         echo "--- x86_64 (TSC 计数) ---"
-        run_qemu build/bench-x86_64.log 6 \
+        run_qemu build/bench-x86_64.log 30 \
                 qemu-system-x86_64 \
                 -kernel build/x86_64/liteos.bin \
                 -m 256M \
@@ -58,7 +58,7 @@ run_x86_64() {
 
 run_riscv64() {
         echo "--- riscv64 (time CSR 计数, 10 MHz) ---"
-        run_qemu build/bench-riscv64.log 25 \
+        run_qemu build/bench-riscv64.log 60 \
                 qemu-system-riscv64 \
                 -machine virt -bios default -m 256M \
                 -kernel build/riscv64/liteos.bin \

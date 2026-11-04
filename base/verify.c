@@ -123,7 +123,7 @@ static void verify_primitives(void)
         motion_event_t ev = make_event(a, FRAME_WORLD, 1000000000ULL, 1, 100, 0);
         check("A moves relative to the world",
               base_apply(clk, &ev) == MOTION_OK && object_event_count(a) == 1);
-        check("A is not still", !object_is_still(a));
+        check("A is not commanded to be still", !object_commanded_is_zero(a));
 
         /*
          * 2. B 相对 A 静止 —— 这就是「静止是一种相对的运动」。
@@ -132,7 +132,8 @@ static void verify_primitives(void)
         ev = make_event(b, a, 1000000000ULL, 1, 0, 0);
         check("B is still relative to A (motion == 0)",
               base_apply(clk, &ev) == MOTION_OK);
-        check("B reads as still", object_is_still(b));
+        check("B is commanded to be still relative to A",
+              object_commanded_is_zero(b));
 
         /* 3. 参照系必须是一条有效的接线 */
         ev = make_event(a, 9999, 1000000000ULL, 1, 5, 0);
@@ -547,12 +548,18 @@ static void verify_execution(void)
               ok && fast_pos == st.position[0]);
 
         /*
-         * 相对 fast 静止的物件，在世界里跟着 fast 一起走 ——
-         * 「静止是一种相对的运动」在时间推进下依然成立。
+         * 相对 fast 静止的物件：它自己的位姿不动（相对参照系没有位移），
+         * 但解算到世界之后，它的世界速度与 fast 相同 ——
+         * 「静止是一种相对的运动」在时间推进下依然成立，而且这句话的
+         * 两半现在各自可测：相对位姿为零，世界速度不为零。
          */
         ok = object_state(follower, &st);
-        check("an object still relative to fast moves with it",
-              ok && st.position[0] == fast_pos);
+        check("an object still relative to fast has no pose of its own",
+              ok && st.position[0] == 0 && st.position[1] == 0);
+
+        motion_fixed_t fr[MOTION_DOF_MAX];
+        check("...yet resolves to fast's world velocity",
+              object_resolve(follower, fr) && fr[0] == Q(1));
 
         /* 落后很久之后只走一步，不会一次补跑几十步 */
         u32 late_st = 0;
@@ -583,10 +590,10 @@ static void verify_conformance(void)
         base_apply(clk, &ev);
         ev = make_event(o, FRAME_WORLD, 1000000000ULL, 1, 0, 0);
         check("R1 a zero-motion event makes the object still",
-              base_apply(clk, &ev) == MOTION_OK && object_is_still(o));
+              base_apply(clk, &ev) == MOTION_OK && object_commanded_is_zero(o));
         ev = make_event(o, FRAME_WORLD, 1000000000ULL, 0, 0, 0);
         check("R1 a zero-dof event is also accepted as still",
-              base_apply(clk, &ev) == MOTION_OK && object_is_still(o));
+              base_apply(clk, &ev) == MOTION_OK && object_commanded_is_zero(o));
 
         /*
          * R2：自持 —— 窗口只约束「何时可被接受」；一旦接受，
@@ -937,6 +944,187 @@ static void verify_dof_and_capability(void)
         object_unplug(raw);
 }
 
+/* ------------------------------------------------------------------ */
+/* 第十一部分：命令 / 解算 / 实测三者分离                              */
+/*                                                                    */
+/* 三条缺陷同源：三个不同的量被当成同一个用。                          */
+/*   1. object_resolve() 只做「旋转 + 相加」，丢掉位置耦合项 ω × r ——  */
+/*      挂在自转参照系上的物件只会跟着平移，不会被转出去。             */
+/*   2. 执行层把解算出的**世界**速度积分进**相对参照系**的 position —— */
+/*      参照系自己在动时，物件的相对位姿会长出参照系的位移。           */
+/*   3. state.linear / angular 从不被写入，永远是零。                  */
+/* ------------------------------------------------------------------ */
+
+/*
+ * 把执行层的时间轴推到 at，保证不回退。物件首次被看见只排期，
+ * 因此调用者要自己多推几个周期才看得到位移。
+ */
+static void run_to(u64 at)
+{
+        u32 stepped = 0;
+
+        if (object_now_ns() < at)
+                object_run(at, &stepped);
+}
+
+static void verify_commanded_resolved_measured(void)
+{
+        arch_puts("\n--- commanded / resolved / measured ---\n\n");
+
+        /*
+         * 一个绕自身 z 轴以 1 rad/s 自转的转台，物件挂在半径 1 m 处。
+         * 物件自己相对转台静止（命令为零），但它在世界里必须沿切向
+         * 以 1 m/s 运动：v = ω × r = (0,0,1) x (1,0,0) = (0,1,0)。
+         * 少了这一项，解出来的世界速度会是零 —— 物体「钉」在转台上被拖着
+         * 平移，而不是被转出去。
+         */
+        wire_t table = object_plug(0, 1 * MS);
+        wire_t rider = object_plug(0, 1 * MS);
+
+        motion_event_t ev = make_event(table, FRAME_WORLD, 1000000000ULL, 6,
+                                       0, 0);
+        ev.motion[5] = Q(1);                     /* 角速度 z = 1 rad/s */
+        check("a turntable spinning about z is accepted",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        ev = make_event(rider, table, 1000000000ULL, 3, 0, 0);
+        check("a rider still relative to the turntable is accepted",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        object_state_t st;
+        for (u8 i = 0; i < 3; i++) {
+                st.position[i] = 0;
+                st.linear[i]   = 0;
+                st.angular[i]  = 0;
+        }
+        for (u8 i = 0; i < 4; i++)
+                st.orientation[i] = 0;
+        st.position[0] = Q(1);                   /* 半径 1 m */
+        object_set_state(rider, &st);
+
+        motion_fixed_t r[MOTION_DOF_MAX];
+        bool ok = object_resolve(rider, r);
+        check("the rider's world linear velocity is omega x r = (0, 1, 0)",
+              ok && r[0] == 0 && near(r[1], Q(1)) && near(r[2], 0));
+        check("the rider's world angular velocity is the turntable's",
+              ok && near(r[5], Q(1)));
+
+        /*
+         * 命令与实测必须分开：rider 自己被告知的是零，实测位姿是半径 1 m，
+         * 世界速度是 1 m/s。三者同时成立，互不覆盖。
+         */
+        ok = object_state(rider, &st);
+        check("the rider's own commanded motion stays zero",
+              ok && object_commanded_is_zero(rider));
+        check("the rider's own measured position stays at radius 1",
+              ok && st.position[0] == Q(1));
+
+        /*
+         * 位置耦合项用的是实测位置：把半径改成 2 m，切向速度必须翻倍。
+         * 若耦合项取的是命令，这里不会有任何变化。
+         */
+        st.position[0] = Q(2);
+        object_set_state(rider, &st);
+        ok = object_resolve(rider, r);
+        check("doubling the measured radius doubles the tangential speed",
+              ok && near(r[1], Q(2)));
+
+        /*
+         * 参照系自己平移时，物件**相对位姿**不该长出参照系的位移。
+         * 位置耦合项只作用于 world 解算，不回流进 state.position。
+         */
+        st.position[0] = 0;
+        object_set_state(rider, &st);
+        ev = make_event(table, FRAME_WORLD, 1000000000ULL, 3, Q(1), 0);
+        ev.motion[5] = 0;                        /* 只平移，不自转 */
+        check("the turntable is now a purely translating frame",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        ev = make_event(rider, table, 1000000000ULL, 3, 0, 0);
+        check("the rider is still relative to it",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        u64 t0 = object_now_ns();
+        for (u64 t = 1; t <= 4; t++)
+                run_to(t0 + t * MS);
+
+        ok = object_state(rider, &st);
+        check("a carried object accumulates no pose of its own",
+              ok && st.position[0] == 0 && st.position[1] == 0);
+        check("but its resolved world velocity is the frame's",
+              object_resolve(rider, r) && near(r[0], Q(1)));
+
+        /*
+         * 实测速度不再是死字段：执行层推进过之后，state.linear/angular
+         * 必须反映本物件相对参照系的速度。
+         */
+        ev = make_event(rider, table, 1000000000ULL, 6, Q(1), 0);
+        ev.motion[5] = Q(2);
+        check("the rider is given its own velocity",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        t0 = object_now_ns();
+        for (u64 t = 1; t <= 3; t++)
+                run_to(t0 + t * MS);
+
+        ok = object_state(rider, &st);
+        check("measured linear velocity reflects the command",
+              ok && st.linear[0] == Q(1));
+        check("measured angular velocity reflects the command",
+              ok && st.angular[2] == Q(2));
+
+        /*
+         * 改写位姿必须丢掉旧的积分余数。
+         *
+         * 先让物件跑出一点余数（3 m/s 在 1 ms 上每步 0.003 m，不整除），
+         * 再把位置清零。若余数被留下，下一步就会把上一个位置的历史
+         * 零头加到新位置上，位置不再是 0 而是那个零头。
+         */
+        wire_t carrier = object_plug(0, 1 * MS);
+        ev = make_event(carrier, FRAME_WORLD, 1000000000ULL, 1, Q(3), 0);
+        check("a third object takes a non-dividing velocity",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        t0 = object_now_ns();
+        for (u64 t = 1; t <= 5; t++)
+                run_to(t0 + t * MS);
+
+        for (u8 i = 0; i < 3; i++) {
+                st.position[i] = 0;
+                st.linear[i]   = 0;
+                st.angular[i]  = 0;
+        }
+        for (u8 i = 0; i < 4; i++)
+                st.orientation[i] = 0;
+        object_set_state(carrier, &st);
+
+        ok = object_state(carrier, &st);
+        check("an externally written pose reads back exactly",
+              ok && st.position[0] == 0);
+
+        /*
+         * 改写位姿（余数被清）之后立刻换一条新命令：此后位置的增长
+         * 必须只来自「新命令 × 周期」。若旧余数还留着，前几步在 3 m/s
+         * 上攒下的零头会被加进来，位置就不是这条干净新轨迹的值。
+         */
+        ev = make_event(carrier, FRAME_WORLD, 1000000000ULL, 1, Q(1), 0);
+        check("a fresh 1 m/s command is accepted",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        t0 = object_now_ns();
+        run_to(t0 + 1 * MS);
+        t0 = object_now_ns();
+        run_to(t0 + 1 * MS);
+
+        ok = object_state(carrier, &st);
+        check("the stale carry does not leak into the new trajectory",
+              ok && st.position[0] == q_dist(Q(1), 1 * MS, 2));
+
+        object_unplug(table);
+        object_unplug(rider);
+        object_unplug(carrier);
+}
+
 int base_verify(void)
 {
         failures = 0;
@@ -952,6 +1140,7 @@ int base_verify(void)
         verify_freshness();
         verify_time_safety();
         verify_dof_and_capability();
+        verify_commanded_resolved_measured();
 
         arch_puts("\n  failures = ");
         arch_putdec((u64)failures);
