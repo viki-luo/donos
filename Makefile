@@ -188,7 +188,8 @@ clean:
 
 # 符号门禁：镜像必须存在、非空，且不含任何未定义符号。
 # 裸机没有运行时库可链接，所以任何 ' U ' 符号都是运行时跳向地址零。
-.PHONY: check-symbols check-docs check-release check-all host-test sanitize
+.PHONY: check-symbols check-docs check-release check-all check-purity \
+        host-test sanitize
 check-symbols:
 	@set -e; \
 	for arch in x86_64 riscv64; do \
@@ -214,6 +215,18 @@ check-docs:
 	fi; \
 	echo "  ok   无发布占位符"
 
+# 纯净性门禁：基座只做运动控制，因此 base/base.c 里不得出现能力、行程、
+# 姿态、质量这些「世界信息」的名字 —— 一旦出现，基座就开始理解世界了，
+# 而「基座无状态」这条不变量正是靠「它无从理解」来成立的。
+# 这是可证伪的静态断言，不是口号：符号名一旦写进去，门禁立刻失败。
+check-purity:
+	@set -e; \
+	if grep -nE 'cap|limit_min|limit_max|max_rate|mass|orientation|position|described|still' \
+		base/base.c; then \
+		echo "base/base.c 出现了非运动控制的名字（基座不应理解世界）"; exit 1; \
+	fi; \
+	echo "  ok   base/base.c 只提到接线与原语"
+
 HOST_CC     ?= clang
 HOST_CFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror \
                -Ibase/include
@@ -237,7 +250,7 @@ sanitize:
 		-o build/host/test_fixed_ubsan.exe
 	@build/host/test_fixed_ubsan.exe
 
-check-release: check-symbols check-docs
+check-release: check-symbols check-docs check-purity
 	@echo "=== 发布前门禁通过 / release gate passed ==="
 
 check-all: check host-test sanitize check-release

@@ -310,7 +310,8 @@ static void verify_self_description(void)
         check("capability is unavailable before the object describes itself",
               !object_capability(part, &got));
 
-        object_describe(part, &cap);
+        check("a well-formed description is accepted",
+              object_describe(part, &cap));
         check("capability becomes readable after describing",
               object_capability(part, &got) && got.dof == 3);
         check("limits survive the round trip",
@@ -781,6 +782,161 @@ static void verify_time_safety(void)
         object_unplug(fresh);
 }
 
+/* ------------------------------------------------------------------ */
+/* 第十部分：dof 尾部与能力申报的纪律                                  */
+/*                                                                    */
+/* 两条缺陷同源：模型读了「没被声明的东西」。                         */
+/*   1. 事件只声明 dof 个分量，实现却照抄全部 6 个 —— 尾部可能是上一条  */
+/*      命令的残值或未初始化的栈内容，而且会顺参照链累加进世界速度。    */
+/*   2. 能力申报来者不拒 —— dof 越界、区间反向、负速率都会被接受，      */
+/*      而申报过的 max_rate 从不被检查。                              */
+/* ------------------------------------------------------------------ */
+
+static void cap_zero(object_capability_t *cap)
+{
+        cap->dof = 0;
+        cap->mass = 0;
+        for (u8 i = 0; i < MOTION_DOF_MAX; i++) {
+                cap->limit_min[i] = 0;
+                cap->limit_max[i] = 0;
+                cap->max_rate[i]  = 0;
+        }
+}
+
+static void verify_dof_and_capability(void)
+{
+        arch_puts("\n--- dof tail and declared capability ---\n\n");
+
+        wire_t hub  = object_plug(2, 1000000);
+        wire_t leaf = object_plug(2, 1000000);
+
+        /* hub 只声明 1 个自由度，尾部全部填上哨兵值 */
+        motion_event_t ev = make_event(hub, FRAME_WORLD, 1000000000ULL,
+                                       1, Q(1), Q(9));
+        ev.motion[2] = Q(9);
+        ev.motion[3] = Q(9);
+        ev.motion[4] = Q(9);
+        ev.motion[5] = Q(9);
+        check("an event with a polluted tail is still accepted",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        check("the tail outside dof is normalised to zero",
+              object_motion(hub, 1) == 0 && object_motion(hub, 2) == 0 &&
+              object_motion(hub, 3) == 0 && object_motion(hub, 4) == 0 &&
+              object_motion(hub, 5) == 0);
+        check("the declared component is kept",
+              object_motion(hub, 0) == Q(1));
+
+        /*
+         * 关键一条：leaf 相对 hub 静止（dof = 0）。hub 的尾部若被照抄，
+         * 就会顺着参照链把自己那些「没被命令的角速度」加进 leaf 的
+         * 世界运动里 —— 一个 dof=1 的物件因此能推动整条链。
+         */
+        ev = make_event(leaf, hub, 1000000000ULL, 0, 0, 0);
+        check("a still child is accepted",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        motion_fixed_t r[MOTION_DOF_MAX];
+        for (u8 i = 0; i < MOTION_DOF_MAX; i++)
+                r[i] = 0;
+        check("the tail cannot leak through the frame chain",
+              object_resolve(leaf, r) && r[0] == Q(1) && r[1] == 0 &&
+              r[2] == 0 && r[3] == 0 && r[4] == 0 && r[5] == 0);
+
+        object_unplug(leaf);
+
+        /* ---- 能力申报的校验 ---- */
+
+        object_capability_t cap;
+        object_capability_t got;
+
+        cap_zero(&cap);
+        cap.dof = MOTION_DOF_MAX + 1;
+        check("a description with dof over the limit is refused",
+              !object_describe(hub, &cap));
+        check("a refused description leaves the object undeclared",
+              !object_capability(hub, &got));
+
+        cap_zero(&cap);
+        cap.dof = 1;
+        cap.limit_min[0] = Q(10);
+        cap.limit_max[0] = Q(-10);
+        check("a description with an inverted interval is refused",
+              !object_describe(hub, &cap));
+
+        cap_zero(&cap);
+        cap.dof = 1;
+        cap.max_rate[0] = -Q(1);
+        check("a description with a negative rate is refused",
+              !object_describe(hub, &cap));
+
+        cap_zero(&cap);
+        cap.dof = 1;
+        cap.mass = -Q(1);
+        check("a description with a negative mass is refused",
+              !object_describe(hub, &cap));
+
+        check("still undeclared after four refused descriptions",
+              !object_capability(hub, &got));
+
+        cap_zero(&cap);
+        cap.dof = 1;
+        cap.mass = Q(1);
+        cap.limit_min[0] = Q(-1);
+        cap.limit_max[0] = Q(1);
+        cap.max_rate[0]  = Q(2);
+        cap.max_rate[3]  = Q(7);            /* 超出 dof：应被清零 */
+        check("a well-formed description is accepted",
+              object_describe(hub, &cap));
+
+        check("the inactive axes of a description are zeroed",
+              object_capability(hub, &got) && got.max_rate[3] == 0 &&
+              got.limit_max[3] == 0);
+
+        /* ---- 申报的速率现在真的会拦命令 ---- */
+
+        ev = make_event(hub, FRAME_WORLD, 1000000000ULL, 1, Q(3), 0);
+        check("a command above the declared rate is refused with E_LIMIT",
+              base_apply(clk, &ev) == MOTION_E_LIMIT);
+
+        ev = make_event(hub, FRAME_WORLD, 1000000000ULL, 1, Q(2), 0);
+        check("a command exactly at the declared rate is accepted",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        ev = make_event(hub, FRAME_WORLD, 1000000000ULL, 1, -Q(2), 0);
+        check("the same rate in the negative direction is accepted",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        ev = make_event(hub, FRAME_WORLD, 1000000000ULL, 1, -Q(3), 0);
+        check("an over-rate command in the negative direction is refused",
+              base_apply(clk, &ev) == MOTION_E_LIMIT);
+
+        /*
+         * INT64_MIN 的幅值是 2^63，取负会在 INT64_MIN 上溢出，
+         * 因此它必须被单独判定为超限，而不是绕过检查。
+         */
+        ev = make_event(hub, FRAME_WORLD, 1000000000ULL, 1, INT64_MIN, 0);
+        check("INT64_MIN cannot slip past the rate gate",
+              base_apply(clk, &ev) == MOTION_E_LIMIT);
+
+        check("a refused command does not disturb the accepted motion",
+              object_motion(hub, 0) == -Q(2));
+
+        /* dof 之外的轴本来就没有分量，速率闸门不该对它们生效 */
+        ev = make_event(hub, FRAME_WORLD, 1000000000ULL, 1, Q(1), Q(9));
+        check("the tail is not rate-checked because it is not commanded",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        object_unplug(hub);
+
+        /* 未申报能力的物件不设限：能力闸门只在申报之后生效 */
+        wire_t raw = object_plug(2, 1000000);
+        ev = make_event(raw, FRAME_WORLD, 1000000000ULL, 6, Q(9), Q(9));
+        check("an object that declared nothing is not rate-limited",
+              base_apply(clk, &ev) == MOTION_OK);
+        object_unplug(raw);
+}
+
 int base_verify(void)
 {
         failures = 0;
@@ -795,6 +951,7 @@ int base_verify(void)
         verify_fixed_boundaries();
         verify_freshness();
         verify_time_safety();
+        verify_dof_and_capability();
 
         arch_puts("\n  failures = ");
         arch_putdec((u64)failures);

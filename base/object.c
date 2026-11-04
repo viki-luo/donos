@@ -164,6 +164,29 @@ void object_unplug(wire_t w)
  * now_ns 是事件本次到达入口的提交时刻，只在本次调用中使用；基座与
  * 物件都不把它保存成世界时钟，也不复用 object_run() 的旧调度节拍。
  */
+/*
+ * 幅值是否超过申报上限。上限为 0 表示该轴未申报，永不设限。
+ *
+ * INT64_MIN 的幅值是 2^63，任何 int64 正上限都拦不住它，而直接取负会
+ * 在 INT64_MIN 上溢出，所以先把这一支单独判掉。
+ */
+static bool exceeds_rate(motion_fixed_t v, motion_fixed_t limit)
+{
+        if (limit <= 0)
+                return false;
+        if (v == INT64_MIN)
+                return true;
+        return (v < 0 ? -v : v) > limit;
+}
+
+static bool within_declared_rate(const object_t *o, const motion_event_t *ev)
+{
+        for (u8 i = 0; i < ev->dof && i < MOTION_DOF_MAX; i++)
+                if (exceeds_rate(ev->motion[i], o->cap.max_rate[i]))
+                        return false;
+        return true;
+}
+
 motion_status_t object_submit(wire_t w, u64 now_ns,
                               const motion_event_t *ev)
 {
@@ -184,11 +207,31 @@ motion_status_t object_submit(wire_t w, u64 now_ns,
         if (now_ns > deadline)
                 return MOTION_E_DEADLINE;         /* 过期：拒绝陈旧命令 */
 
+        /*
+         * 能力闸门：物件只接受自己申报能力范围内的速率。
+         *
+         * 这一步在物件侧，不在基座里 —— 基座不读能力申报，也无从知道
+         * max_rate 是什么。max_rate 为 0 表示「未申报该轴」，此时不设限；
+         * 申报了却不执行，申报就是装饰，与 duration_ns 曾经的下场一样。
+         */
+        if (o->described && !within_declared_rate(o, ev))
+                return MOTION_E_LIMIT;
+
         o->dof = ev->dof;
         o->frame = ev->frame;
         o->duration_ns = ev->duration_ns;
+
+        /*
+         * dof 尾部归零，不是「照抄全部 6 个分量」。
+         *
+         * 事件只声明了 dof 个分量，其余位置不是这条命令的一部分：调用者
+         * 完全可能只填自己声明的那几个，尾部留着上一条命令的残值或未初始化
+         * 的栈内容。照抄会把「没被命令的运动」带进模型，而且它会顺着参照链
+         * 累加进世界速度（object_resolve 按 6 轴累加），一个 dof=1 的物件
+         * 因此能悄悄推动整条链的角速度。
+         */
         for (u8 i = 0; i < MOTION_DOF_MAX; i++)
-                o->motion[i] = ev->motion[i];
+                o->motion[i] = i < ev->dof ? ev->motion[i] : 0;
         o->event_count++;
 
         return MOTION_OK;
@@ -231,20 +274,43 @@ motion_fixed_t object_motion(wire_t w, u8 i)
 /* memcpy，而 freestanding 下没有链接 libc。                          */
 /* ------------------------------------------------------------------ */
 
-void object_describe(wire_t w, const object_capability_t *cap)
+bool object_describe(wire_t w, const object_capability_t *cap)
 {
         object_t *o = find_by_wire(w);
         if (o == 0 || cap == 0)
-                return;
+                return false;
 
+        if (cap->dof > MOTION_DOF_MAX || cap->mass < 0)
+                return false;
+
+        for (u8 i = 0; i < cap->dof; i++) {
+                if (cap->limit_min[i] > cap->limit_max[i])
+                        return false;           /* 区间反向 */
+                if (cap->max_rate[i] < 0)
+                        return false;           /* 负速率无意义 */
+        }
+
+        /*
+         * 校验通过才写入，且 dof 之外的轴按「未申报」清零。
+         *
+         * 校验失败时不改动任何已有记录：一份被悄悄打折的申报比没有申报
+         * 更危险，而静默接受非法申报正是死字段的来源。
+         */
         o->cap.dof = cap->dof;
         o->cap.mass = cap->mass;
         for (u8 i = 0; i < MOTION_DOF_MAX; i++) {
-                o->cap.limit_min[i] = cap->limit_min[i];
-                o->cap.limit_max[i] = cap->limit_max[i];
-                o->cap.max_rate[i]  = cap->max_rate[i];
+                if (i < cap->dof) {
+                        o->cap.limit_min[i] = cap->limit_min[i];
+                        o->cap.limit_max[i] = cap->limit_max[i];
+                        o->cap.max_rate[i]  = cap->max_rate[i];
+                } else {
+                        o->cap.limit_min[i] = 0;
+                        o->cap.limit_max[i] = 0;
+                        o->cap.max_rate[i]  = 0;
+                }
         }
         o->described = true;
+        return true;
 }
 
 bool object_capability(wire_t w, object_capability_t *out)

@@ -40,6 +40,13 @@
   wrapping endpoints and events from the future are all `MOTION_E_INVAL`
 - **`motion_event_t` 增加 `issued_at_ns` 字段**：结构体成员增至 6 个
   / **`motion_event_t` gains `issued_at_ns`**: six members instead of five
+- **一个接口签名变更**：`void object_describe(...)` →
+  `bool object_describe(...)`。申报可能被校验拒绝，调用者必须能知道 ——
+  静默拒绝正是死字段的来源
+  / **one signature change**: `void object_describe(...)` becomes
+  `bool object_describe(...)`. A description can now be refused by validation
+  and the caller has to be able to learn that — a silent refusal is exactly how
+  dead fields are born
 - **两个接口签名变更**：`base_apply(const motion_event_t *)` →
   `base_apply(u64 now_ns, const motion_event_t *)`；
   `u32 object_run(u64 now_ns)` → `object_run_status_t object_run(u64 now_ns, u32 *stepped)`。
@@ -55,6 +62,35 @@
 
 ### Fixed / 修复
 
+- **事件的 `dof` 尾部会进入模型并顺参照链累加**：`object_submit()` 照抄
+  全部 6 个 `motion[]` 分量，而事件只声明了前 `dof` 个 —— 尾部可能是上一条
+  命令的残值或未初始化的栈内容。`object_resolve()` 又按 6 轴累加参照链，
+  于是一个 `dof = 1` 的物件能把自己「没被命令的角速度」加进子物件的世界
+  运动。现在接受时把 `dof` 之外的分量归零：声明之外的字段不进入模型
+  / **the `dof` tail entered the model and accumulated along the frame chain**:
+  `object_submit()` copied all six `motion[]` components while an event declares
+  only the first `dof`. The tail could hold the previous command's leftovers or
+  uninitialised stack content, and `object_resolve()` accumulated all six axes
+  along the chain — so a `dof = 1` object could add angular velocity it was
+  never commanded into a child's world motion. The components outside `dof` are
+  now zeroed on acceptance: what was not declared does not enter the model
+- **能力申报来者不拒，且申报过的 `max_rate` 从不被检查**：`object_describe()`
+  接受 `dof > MOTION_DOF_MAX`、区间反向（`limit_min > limit_max`）、负速率与
+  负质量；`object_capability()` 随后把它们原样返回。申报的速率上限在任何
+  代码路径上都不产生效果，等于又一处死字段。现在申报会被校验，非法申报
+  **整体拒绝且不留半份记录**（`object_capability()` 继续返回 `false`）；
+  `dof` 之外的轴清零；命令超出已申报的非零 `max_rate` 时返回新增的
+  `MOTION_E_LIMIT`。幅值判定对 `INT64_MIN` 单独处理，避免取负溢出绕过闸门
+  / **capability declarations were accepted unchecked, and a declared
+  `max_rate` was never enforced**: `object_describe()` accepted
+  `dof > MOTION_DOF_MAX`, inverted intervals, and negative rates or mass, and
+  `object_capability()` handed them straight back. A declared rate limit had no
+  effect on any code path — another dead field. Descriptions are now validated
+  and an invalid one is **refused as a whole, leaving no partial record**
+  (`object_capability()` keeps returning `false`); axes outside `dof` are
+  zeroed; and a command exceeding a declared non-zero `max_rate` returns the new
+  `MOTION_E_LIMIT`. The magnitude test handles `INT64_MIN` separately so that
+  negating it cannot slip past the gate
 - **Q32.32 算术未定义行为**：速度积分此前直接计算有符号 64 位
   `velocity * period_ns + carry`。例如 Q32.32 的 3 m/s 乘 1 秒周期得到
   `12,884,901,888,000,000,000`，超过 `INT64_MAX`，会进入 C 有符号溢出
@@ -185,6 +221,33 @@
   schedules, the next period boundary performs exactly one step, a null step
   counter is refused, a wrapping scheduling addition is refused, and the clock
   remains usable afterwards. Measured on **both architectures**
+- **能力申报与 `dof` 尾部验证段**（`base/verify.c`，第十部分，两个架构各 21 条
+  断言）：尾部归零、尾部不得顺参照链泄漏进子物件的世界运动、`dof` 越界拒绝、
+  区间反向拒绝、负速率拒绝、负质量拒绝、被拒后仍为「未申报」、合法申报被接受、
+  未激活轴清零、超速率命令返回 `MOTION_E_LIMIT`、恰好等于上限被接受、
+  负方向同一判定、`INT64_MIN` 不能绕过闸门、被拒命令不扰动已接受运动、
+  未申报能力的物件不设限
+  / **capability and `dof`-tail verification section** (`base/verify.c`,
+  part 10, 21 assertions on each architecture): the tail is normalised to zero,
+  the tail cannot leak through the frame chain into a child's world motion,
+  out-of-range `dof` refused, inverted interval refused, negative rate refused,
+  negative mass refused, the object stays undeclared after refusals, a
+  well-formed description is accepted, inactive axes are zeroed, an over-rate
+  command is refused with `MOTION_E_LIMIT`, exactly-at-limit accepted, the same
+  in the negative direction, `INT64_MIN` cannot bypass the gate, a refused
+  command leaves the accepted motion untouched, and an object that declared
+  nothing is not rate-limited
+- **基座纯净性门禁 `make check-purity`**（纳入 `check-release`）：用符号名匹配
+  断言 `base/base.c` 里不出现 `cap`、`limit_min`、`limit_max`、`max_rate`、
+  `mass`、`orientation`、`position`、`described`、`still` —— 基座一旦开始
+  理解这些名字，就不再是无状态函数了。该门禁已实测会**真的失败**
+  （向副本注入 `object_capability_t cap` 即被捕获），不是空跑
+  / **base-purity gate `make check-purity`** (part of `check-release`): symbol
+  matching asserts that `base/base.c` never mentions `cap`, `limit_min`,
+  `limit_max`, `max_rate`, `mass`, `orientation`, `position`, `described` or
+  `still` — as soon as the base understands those names it is no longer a
+  stateless function. The gate was shown to **actually fail** by injecting
+  `object_capability_t cap` into a copy, so it is not a no-op
 
 ### Changed / 变更
 

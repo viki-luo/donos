@@ -97,10 +97,25 @@ motion_status_t object_submit(wire_t w, u64 now_ns,
 
 /* ---- 物件自述与自持（R8）：只对大脑可见，基座无路径 ---- */
 
-/* 物件申报自己的能力。申报前 object_capability 返回 false。 */
-void object_describe(wire_t w, const object_capability_t *cap);
+/*
+ * 物件申报自己的能力。成功返回 true。
+ *
+ * 申报会被**校验**，不合法的申报整体拒绝、不留下半份记录。拒绝条件：
+ *   - dof > MOTION_DOF_MAX
+ *   - 有效轴（i < dof）上 limit_min[i] > limit_max[i]（区间反向）
+ *   - 有效轴（i < dof）上 max_rate[i] < 0（速率为负没有意义）
+ *   - mass < 0
+ * dof 之外的轴一律按「未申报」清零，与事件的 dof 尾部同一条纪律：
+ * 声明之外的字段不进入模型，也就不会被后来的读者捡到。
+ *
+ * 校验失败返回 false 且 object_capability 继续返回 false —— 一份被
+ * 悄悄打折的申报比没有申报更危险，而静默接受非法申报正是死字段的来源。
+ */
+bool object_describe(wire_t w, const object_capability_t *cap);
 
-/* 读取物件申报过的能力。未申报或接线无效返回 false。 */
+/*
+ * 读取物件申报过的能力。未申报、申报被拒或接线无效返回 false。
+ */
 bool object_capability(wire_t w, object_capability_t *out);
 
 /* 物件更新自己的位姿与速度（由物件自己的控制环调用）。 */

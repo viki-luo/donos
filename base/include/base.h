@@ -113,6 +113,7 @@ typedef enum {
         MOTION_E_NO_FRAME  = -3,  /* 参照系接线不存在或已断开 */
         MOTION_E_NO_OBJECT = -4,  /* 接线当前没有物件 */
         MOTION_E_DEADLINE  = -5,  /* 事件已过期：发出时刻 + 窗口早于提交时刻 */
+        MOTION_E_LIMIT     = -6,  /* 命令幅值超出物件自报的最大速率（物件侧判定） */
 } motion_status_t;
 
 /*
@@ -122,6 +123,11 @@ typedef enum {
  * 本次调用的参数传给物件，不保存时间；因此新鲜度判断不会错误复用
  * 上一次 object_run 的旧节拍。过期事件以 MOTION_E_DEADLINE 拒绝；
  * 一旦接受，物件持续沿该事件运动。
+ *
+ * 基座自身只校验「事件形状」：dof 不越界、目标接线与参照接线当前有效。
+ * 它不读 motion[]、不读能力申报、不知道 max_rate / 行程 / 姿态的存在，
+ * 因此 MOTION_E_LIMIT 这类「物件按自身能力拒绝」的状态码由物件层产生，
+ * 基座只是把它原样传回。这条分工由 make check-purity 静态断言。
  */
 motion_status_t base_apply(u64 now_ns, const motion_event_t *ev);
 
