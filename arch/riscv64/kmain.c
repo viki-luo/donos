@@ -11,9 +11,30 @@
 #include "arch.h"
 #include "base.h"
 #include "bench.h"
+#include "brain.h"
 #include "bus.h"
 #include "object.h"
 #include "verify.h"
+
+/* 打印 Q32.32，带三位小数且保留符号（只打整数会把 -0.5 打成「-0」） */
+static void put_fixed(motion_fixed_t v)
+{
+        const motion_fixed_t one = 4294967296LL;
+        bool neg = v < 0;
+        motion_fixed_t a = neg ? -v : v;
+        motion_fixed_t whole = a / one;
+        motion_fixed_t frac = ((a % one) * 1000) / one;
+
+        if (neg)
+                arch_puts("-");
+        arch_putdec((u64)whole);
+        arch_puts(".");
+        if (frac < 100)
+                arch_puts("0");
+        if (frac < 10)
+                arch_puts("0");
+        arch_putdec((u64)frac);
+}
 
 /* 10 ms，与 x86_64 的 PIT 100 Hz 一致；由定时器中断的节拍决定 */
 #define STEP_NS ARCH_NS_PER_TICK
@@ -49,6 +70,9 @@ void kernel_main(u64 hartid, u64 dtb)
         /* 测量：原语代价、参照链代价、最坏节拍占用、压力行为 */
         bench_run();
 
+        /* 大脑热切换自检：时间基准取自 object_now_ns()，接着基准往前推 */
+        brain_verify();
+
         /*
          * 重新装订定时器，丢弃基准期间的积压。
          *
@@ -65,6 +89,18 @@ void kernel_main(u64 hartid, u64 dtb)
 
         wire_t arm  = object_plug(2, STEP_NS);
         wire_t hand = object_plug(2, STEP_NS);
+
+        /*
+         * 被大脑驱动的那只物件：与 arm / hand 完全同类，
+         * 基座里没有一个位是留给「被大脑驱动」的。
+         */
+        wire_t carriage = object_plug(2, STEP_NS);
+
+        brain_t *cruise = brain_cruise(carriage, STEP_NS);
+        brain_t *active = cruise;
+        bool did_swap = false;
+        bool did_report = false;
+        u64 swap_tick = 0;
 
         motion_event_t ev;
         /*
@@ -139,6 +175,59 @@ void kernel_main(u64 hartid, u64 dtb)
                     OBJECT_RUN_OK) {
                         arch_puts("  [live] execution clock refused this "
                                   "instant; no object was advanced\n");
+                }
+
+                /* 大脑在跑：读现场 → base_apply。基座不知道它是谁 */
+                if (active != 0)
+                        brain_tick(active, object_now_ns());
+
+                /* 大脑热切换：2 s 时换成控制律不同的另一个，无交接 */
+                if (reported && !did_swap &&
+                    (ticks - start) * STEP_NS >= 2000000000ULL) {
+                        object_state_t st;
+
+                        arch_puts("\n[swap] detaching brain 'cruise', "
+                                  "attaching 'shuttle'\n");
+
+                        if (object_state(carriage, &st)) {
+                                arch_puts("  carriage position at swap (m) = ");
+                                put_fixed(st.position[0]);
+                                arch_puts("\n  (the new brain will read this from "
+                                          "the object, not from a handover)\n");
+                        }
+
+                        brain_detach(cruise);
+                        active = brain_shuttle(carriage, STEP_NS);
+                        did_swap = true;
+                        swap_tick = ticks;
+
+                        if (active != 0) {
+                                brain_tick(active, object_now_ns());
+                                arch_puts("  new brain commanded (m/s) = ");
+                                put_fixed(object_motion(carriage, 0));
+                                arch_puts(", i.e. the opposite direction\n");
+                        }
+                }
+
+                /* 切换后满 1 秒再报告：基准是切换那一刻，不是启动那一刻 */
+                if (did_swap && !did_report &&
+                    (ticks - swap_tick) * STEP_NS >= 1000000000ULL) {
+                        object_state_t st;
+
+                        if (object_state(carriage, &st)) {
+                                arch_puts("  [swap] after 1 s under the new brain: "
+                                          "carriage position (m) = ");
+                                put_fixed(st.position[0]);
+                                arch_puts(", command (m/s) = ");
+                                put_fixed(object_motion(carriage, 0));
+                                arch_puts(", steps = ");
+                                arch_putdec(object_step_count(carriage));
+                                arch_puts("\n  (one second at the new command "
+                                          "moved it back 0.5 m; the base never\n"
+                                          "   learned that a brain was "
+                                          "replaced)\n");
+                        }
+                        did_report = true;
                 }
 
                 if (!reported && (ticks - start) * STEP_NS >= 1000000000ULL) {

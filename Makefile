@@ -53,7 +53,7 @@ CFLAGS    := --target=$(TARGET_TRIPLE) \
              -fno-pic -fno-pie \
              $(ARCH_CFLAGS) \
              -Wall -Wextra -Werror \
-             -Ibase/include -Idrivers/include -Iarch/$(ARCH)/include
+             -Ibase/include -Ibrain/include -Idrivers/include -Iarch/$(ARCH)/include
 
 # 用 clang 驱动链接，它会按 --target 选择 ELF 模式并使用 lld。
 # 直接调 ld.lld 在 MSYS2 上会误用 PE 驱动。
@@ -78,6 +78,7 @@ endif
 # 源文件
 # ---------------------------------------------------------------------
 C_SRCS := $(wildcard base/*.c) \
+          $(wildcard brain/*.c) \
           $(wildcard drivers/*.c) \
           $(wildcard arch/$(ARCH)/*.c)
 
@@ -169,6 +170,7 @@ check:
 		fi; \
 		grep -qE '^  failures = 0$$' $$log || { echo "$$arch 自检失败"; grep -E '^  (FAIL|failures)' $$log; exit 1; }; \
 		grep -qE '^  bench failures = 0$$' $$log || { echo "$$arch 压力测试失败"; grep -E 'bench failures' $$log; exit 1; }; \
+		grep -qE '^  brain failures = 0$$' $$log || { echo "$$arch 大脑热切换自检失败"; grep -E 'brain failures' $$log; exit 1; }; \
 		grep -q 'protection: what the MMU actually enforces' $$log || { echo "$$arch 未自报保护状态"; exit 1; }; \
 		if logs=$$($(NM) build/$$arch/liteos.bin 2>/dev/null | grep ' U ' | awk '{print $$2}'); \
 		   [ -n "$$logs" ]; then \
@@ -218,10 +220,14 @@ check-docs:
 # 纯净性门禁：基座只做运动控制，因此 base/base.c 里不得出现能力、行程、
 # 姿态、质量这些「世界信息」的名字 —— 一旦出现，基座就开始理解世界了，
 # 而「基座无状态」这条不变量正是靠「它无从理解」来成立的。
-# 这是可证伪的静态断言，不是口号：符号名一旦写进去，门禁立刻失败。
+# 这条可被证伪的静态断言，不是口号：符号名一旦写进去，门禁立刻失败。
+#
+# brain 也在名单里（设计决定 13）：基座若能说出「大脑」这个词，
+# 它就有了「谁在思考」这个概念，也就有了特权层的雏形。大脑只能是
+# 基座之外的一段代码，靠普通接线与基座发生关系。
 check-purity:
 	@set -e; \
-	if grep -nE 'cap|limit_min|limit_max|max_rate|mass|orientation|position|described|still' \
+	if grep -nE 'cap|limit_min|limit_max|max_rate|mass|orientation|position|described|still|brain' \
 		base/base.c; then \
 		echo "base/base.c 出现了非运动控制的名字（基座不应理解世界）"; exit 1; \
 	fi; \
