@@ -53,7 +53,7 @@ CFLAGS    := --target=$(TARGET_TRIPLE) \
              -fno-pic -fno-pie \
              $(ARCH_CFLAGS) \
              -Wall -Wextra -Werror \
-             -Ibase/include -Ibrain/include -Idrivers/include -Iarch/$(ARCH)/include
+             -Ibase/include -Ibrain/include -Imonitor/include -Idrivers/include -Iarch/$(ARCH)/include
 
 # 用 clang 驱动链接，它会按 --target 选择 ELF 模式并使用 lld。
 # 直接调 ld.lld 在 MSYS2 上会误用 PE 驱动。
@@ -79,6 +79,7 @@ endif
 # ---------------------------------------------------------------------
 C_SRCS := $(wildcard base/*.c) \
           $(wildcard brain/*.c) \
+          $(wildcard monitor/*.c) \
           $(wildcard drivers/*.c) \
           $(wildcard arch/$(ARCH)/*.c)
 
@@ -170,6 +171,7 @@ check:
 		fi; \
 		grep -qE '^  failures = 0$$' $$log || { echo "$$arch 自检失败"; grep -E '^  (FAIL|failures)' $$log; exit 1; }; \
 		grep -qE '^  bench failures = 0$$' $$log || { echo "$$arch 压力测试失败"; grep -E 'bench failures' $$log; exit 1; }; \
+		grep -qE '^  monitor failures = 0$$' $$log || { echo "$$arch 监视器自检失败"; grep -E 'monitor failures' $$log; exit 1; }; \
 		grep -qE '^  brain failures = 0$$' $$log || { echo "$$arch 大脑热切换自检失败"; grep -E 'brain failures' $$log; exit 1; }; \
 		grep -q 'protection: what the MMU actually enforces' $$log || { echo "$$arch 未自报保护状态"; exit 1; }; \
 		if logs=$$($(NM) build/$$arch/liteos.bin 2>/dev/null | grep ' U ' | awk '{print $$2}'); \

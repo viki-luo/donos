@@ -16,6 +16,7 @@
 #include "bench.h"
 #include "brain.h"
 #include "bus.h"
+#include "monitor.h"
 #include "object.h"
 #include "verify.h"
 
@@ -125,6 +126,14 @@ void kernel_main(u32 magic, u32 info)
          * 真实的时间回退。
          */
         brain_verify();
+
+        /*
+         * ---- 6.6 基座之外的监视器 ----
+         *
+         * 只观察、不干预：它的出口是事件，不是命令。
+         * 自检本身证明「一次轮询之后物件状态逐字段不变」。
+         */
+        monitor_verify();
 
         /*
          * ---- 7. 运行：PIT 节拍驱动执行层 ----

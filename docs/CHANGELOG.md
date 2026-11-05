@@ -282,6 +282,8 @@
 
 ### Added / 新增
 
+- **基座之外的安全监视器**（`monitor/`，双架构各 7 条自检）：只在基座之上读现场并产出事件（接线非预期消失、解算失败、实测与命令偏差、实测越过自报上限、执行层拒绝时刻），**从不调用 `base_apply`、从不写物件状态**。这一点由自检验证：一次轮询前后每个物件逐字段相同。接线非预期消失只报一次即注销，避免重复告警淹掉后续现场
+  / **out-of-base safety monitor** (`monitor/`, 7 assertions per architecture): it reads the scene above the base and emits events (unexpected wire loss, failed resolution, measured-versus-commanded drift, measured speed above a declared limit, a refused instant) and **never calls `base_apply` and never writes object state**, which the self-test proves by comparing every object field before and after a poll. An unexpected wire loss is reported once and deregistered so repeated alarms cannot drown out later evidence
 - **上层大脑与大脑热切换**（`brain/`，双架构各 14 条自检 + 实机演示）：一个大脑只是「一条普通接线 + 决策周期 + 只读目标与当前时刻的决策函数」，`base/base.c` 里连 `brain` 这个词都被 `make check-purity` 禁止。两个控制律不同的大脑 `cruise`/`shuttle` 在运行 2 秒时热切换：新大脑读物件自持的实测位置做出反向决策（1.989 m → 1.490 m，恰为 -0.5 m/s × 1 s），**没有任何交接物**
   / **upper brains and brain hot swap** (`brain/`, 14 assertions per architecture plus a live demonstration): a brain is just "an ordinary wire plus a decision period plus a decision function that reads only the target and the current instant", and the word `brain` is now forbidden inside `base/base.c` by `make check-purity`. Two brains with different control laws, `cruise` and `shuttle`, swap at two seconds: the new brain reads the object's own measured position and reverses (1.989 m to 1.490 m, exactly -0.5 m/s over 1 s), with **nothing handed over**
 - **确定性模糊语料**（`tests/host/fuzz_base.c`，`make fuzz`，默认 20 万轮）：固定种子、可复现，覆盖 8 类操作（插拔、命令、命令尾部、姿态、能力申报、调度、解算），不变量由影子表独立对账。**可证伪性已实测**：把两处已修复缺陷放回去，语料分别报出数千次与上千次失败；真实代码 20 万轮零失败。诚实边界写在 Flaky 之外：`object_plug()` 的发布顺序窗口在单线程下是等价变异体，语料抓不到，也不声称抓到

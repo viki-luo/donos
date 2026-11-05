@@ -13,6 +13,7 @@
 #include "bench.h"
 #include "brain.h"
 #include "bus.h"
+#include "monitor.h"
 #include "object.h"
 #include "verify.h"
 
@@ -72,6 +73,9 @@ void kernel_main(u64 hartid, u64 dtb)
 
         /* 大脑热切换自检：时间基准取自 object_now_ns()，接着基准往前推 */
         brain_verify();
+
+        /* 基座之外的监视器：只观察、不干预 */
+        monitor_verify();
 
         /*
          * 重新装订定时器，丢弃基准期间的积压。
