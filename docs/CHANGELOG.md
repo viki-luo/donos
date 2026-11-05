@@ -282,6 +282,8 @@
 
 ### Added / 新增
 
+- **确定性模糊语料**（`tests/host/fuzz_base.c`，`make fuzz`，默认 20 万轮）：固定种子、可复现，覆盖 8 类操作（插拔、命令、命令尾部、姿态、能力申报、调度、解算），不变量由影子表独立对账。**可证伪性已实测**：把两处已修复缺陷放回去，语料分别报出数千次与上千次失败；真实代码 20 万轮零失败。诚实边界写在 Flaky 之外：`object_plug()` 的发布顺序窗口在单线程下是等价变异体，语料抓不到，也不声称抓到
+  / **deterministic fuzz corpus** (`tests/host/fuzz_base.c`, `make fuzz`, 200k rounds by default): fixed seed, reproducible, covering 8 operation classes (plug, unplug, command, command tail, pose, capability, scheduling, resolve), with invariants cross-checked against a shadow table. **Falsifiability was measured**: putting two fixed defects back produced thousands and over a thousand failures respectively, while the real code passes 200k rounds. The honest limit is recorded too: the `object_plug()` publish-order window is an equivalent mutant under single-threaded execution, so the corpus cannot reach it and does not claim to
 - **接线世代纪律宿主白盒测试**（`tests/host/test_wire.c`，20 条）：直接包含 `base/base.c` 把接线表推到世代耗尽的边界，不再需要跑四十亿次热插拔；覆盖世代递增、复用不复活、耗尽即退役、全表耗尽报满、高地位别名拒绝、世代/槽位伪造拒绝、越界槽位拒绝、表满等
   / **wiring-generations host white-box test** (`tests/host/test_wire.c`, 20 assertions): includes `base/base.c` directly to push the wiring table to the generation-exhaustion edge, avoiding four billion hot-plugs; covers increasing generations, reuse without resurrection, retirement on exhaustion, exhaustion reporting, high-bit alias rejection, generation/slot forgery rejection, out-of-range rejection, and a full table
 - **热插拔发布顺序验证段**（`base/verify.c` 第十三部分，双架构各 9 条）：旧占用者的命令数、位姿、能力申报、事件数与步数都不会泄漏到复用槽位的新占用者，新占用者带着自己声明的 unit 与周期出现

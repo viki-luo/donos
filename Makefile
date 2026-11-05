@@ -246,6 +246,28 @@ $(WIRE_TEST): tests/host/test_wire.c base/base.c base/include/base.h \
 	@mkdir -p build/host
 	$(HOST_CC) $(HOST_CFLAGS) tests/host/test_wire.c -o $@
 
+# 确定性模糊：固定种子 → 可复现。语料覆盖 8 类操作（含专门核对 dof
+# 尾部的 apply_tail），不变量由影子表独立对账。
+# 注意它抓不到什么：object_plug() 的发布顺序窗口在单线程下是**等价
+# 变异体** —— 函数返回前状态已一致，只有并发读者才看得见那个窗口。
+# 那条纪律靠顺序论证与复用槽位测试（verify.c 第十三部分）保证，不靠这里。
+FUZZ_TEST   := build/host/fuzz_base.exe
+FUZZ_ITERS  ?= 200000
+
+$(FUZZ_TEST): tests/host/fuzz_base.c base/base.c base/object.c base/fixed.c \
+              base/include/base.h base/include/object.h base/include/fixed.h
+	@mkdir -p build/host
+	$(HOST_CC) $(HOST_CFLAGS) tests/host/fuzz_base.c -o $@
+
+fuzz: $(FUZZ_TEST)
+	@$(FUZZ_TEST) $(FUZZ_ITERS) | tee build/host/fuzz.log
+	@set -e; \
+	if grep -q '^  fuzz failures = 0$$' build/host/fuzz.log; then \
+		echo "  ok   确定性模糊 0 失败"; \
+	else \
+		echo "  确定性模糊出现失败"; exit 1; \
+	fi
+
 host-test: $(HOST_TEST) $(WIRE_TEST)
 	@$(HOST_TEST)
 	@$(WIRE_TEST)
@@ -264,9 +286,14 @@ sanitize:
 		tests/host/test_wire.c \
 		-o build/host/test_wire_ubsan.exe
 	@build/host/test_wire_ubsan.exe
+	$(HOST_CC) $(HOST_CFLAGS) -fsanitize=undefined \
+		-fsanitize-undefined-trap-on-error \
+		tests/host/fuzz_base.c \
+		-o build/host/fuzz_base_ubsan.exe
+	@build/host/fuzz_base_ubsan.exe 50000
 
 check-release: check-symbols check-docs check-purity
 	@echo "=== 发布前门禁通过 / release gate passed ==="
 
-check-all: check host-test sanitize check-release
+check-all: check host-test fuzz sanitize check-release
 	@echo "=== 全部门禁通过 / all gates passed ==="
