@@ -1251,6 +1251,106 @@ static void verify_quaternion_and_resolve_status(void)
                 object_unplug(chain[i]);
 }
 
+/* ------------------------------------------------------------------ */
+/* 第十三部分：热插拔的发布顺序                                        */
+/*                                                                    */
+/* 缺陷：object_plug() 先把接线发布出去（in_use + wire），再初始化     */
+/* 其余字段。find_by_wire() 只认这两个字段，于是在那个窗口里命令会被  */
+/* 接受，却按**上一个占用者**的 frame、周期与速率上限判定。           */
+/* 现在接线是最后一个被写入的字段：可见即就绪。                       */
+/* ------------------------------------------------------------------ */
+
+static void verify_hotplug_publish(void)
+{
+        arch_puts("\n--- hot-plug: a reused slot carries no leftovers ---\n\n");
+
+        wire_t a = object_plug(5, 1000000);
+        object_state_t st;
+        object_capability_t cap;
+
+        for (u8 i = 0; i < 3; i++) {
+                st.position[i] = Q(3);
+                st.linear[i]   = Q(2);
+                st.angular[i]  = Q(1);
+        }
+        for (u8 i = 0; i < 4; i++)
+                st.orientation[i] = 0;
+        st.orientation[0] = Q(1);
+        object_set_state(a, &st);
+
+        for (u8 i = 0; i < MOTION_DOF_MAX; i++) {
+                cap.limit_min[i] = -Q(9);
+                cap.limit_max[i] = Q(9);
+                cap.max_rate[i]  = Q(1);
+        }
+        cap.dof = 3;
+        cap.mass = Q(4);
+        object_describe(a, &cap);
+
+        motion_event_t ev = make_event(a, FRAME_WORLD, 1000000000ULL, 1, Q(1), 0);
+        base_apply(clk, &ev);
+
+        u64 before = object_event_count(a);
+
+        check("the first occupant really did accumulate state",
+              before >= 1 && object_capability(a, &cap));
+
+        wire_t departed = a;
+        object_unplug(a);
+
+        check("the departed handle is refused by the base",
+              base_apply(clk, &ev) == MOTION_E_NO_WIRE);
+
+        /*
+         * 重新插一个物件：它很可能落进同一个槽位，但**绝不能**继承
+         * 上一个占用者的命令、位姿或能力申报。
+         */
+        wire_t b = object_plug(1, 3 * 1000000);
+
+        arch_puts("  note: previous wire ");
+        print_wire(departed);
+        arch_puts(", new wire ");
+        print_wire(b);
+        arch_puts("\n\n");
+
+        check("the new occupant is a different, live handle",
+              b != WIRE_NONE && !base_wire_valid(departed));
+
+        check("it inherits no command",
+              object_commanded_is_zero(b));
+
+        check("it inherits no event count",
+              object_event_count(b) == 0);
+
+        object_state_t fresh;
+
+        for (u8 i = 0; i < 3; i++) {
+                fresh.position[i] = 0;
+                fresh.linear[i]   = 0;
+                fresh.angular[i]  = 0;
+        }
+        for (u8 i = 0; i < 4; i++)
+                fresh.orientation[i] = 0;
+
+        check("it inherits no pose",
+              object_state(b, &fresh) && fresh.position[0] == 0 &&
+              fresh.orientation[0] == 0);
+
+        check("it inherits no capability declaration",
+              !object_capability(b, &cap));
+
+        u32 unit = 0;
+        u64 period = 0;
+        check("its own declared unit and period are what it asked for",
+              object_declared(b, &unit, &period) && unit == 1 &&
+              period == 3 * 1000000);
+
+        check("it has not been stepped yet",
+              object_step_count(b) == 0);
+
+        object_unplug(b);
+}
+
 int base_verify(void)
 {
         failures = 0;
@@ -1268,6 +1368,7 @@ int base_verify(void)
         verify_dof_and_capability();
         verify_commanded_resolved_measured();
         verify_quaternion_and_resolve_status();
+        verify_hotplug_publish();
 
         arch_puts("\n  failures = ");
         arch_putdec((u64)failures);

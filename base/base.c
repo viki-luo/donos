@@ -30,6 +30,19 @@
 typedef struct {
         u32  generation;   /* 该槽位被用过的次数，防止旧句柄复活 */
         bool in_use;
+        /*
+         * 世代号耗尽后，这个槽位永久退役。
+         *
+         * 句柄把 32 位世代号放在位 16..47，只有 1..0xFFFFFFFF 可表示。
+         * 再下一次递增会回绕成 0，而被强制改成 1 —— 于是「第一次使用」
+         * 的句柄复活，指向一个陌生物件。1 kHz 热插拔下这个环路约 50 天，
+         * 不是理论问题。
+         *
+         * 修法不是「再加宽」，而是**不再发号**：一个槽位无法再造出
+         * 互不相同的句柄时，它就该退休。退役是接线信息（哪个口还能用），
+         * 不是世界信息，基座持有它不违反无状态。
+         */
+        bool retired;
 } wire_slot_t;
 
 static wire_slot_t wire_table[WIRE_MAX];
@@ -46,6 +59,7 @@ void base_init(void)
         for (u64 i = 0; i < WIRE_MAX; i++) {
                 wire_table[i].in_use = false;
                 wire_table[i].generation = 0;
+                wire_table[i].retired = false;
         }
 }
 
@@ -86,22 +100,39 @@ static wire_slot_t *slot_of(wire_t w)
         return s;
 }
 
+/*
+ * 一个槽位还能不能发出一个**新的**句柄。
+ *
+ * 世代号必须严格递增且可表示：到达 WIRE_GEN_MAX 之后继续发号只能回绕，
+ * 而回绕会让旧句柄复活。此时槽位退役，不再参与分配。
+ */
+#define WIRE_GEN_MAX 0xFFFFFFFFu
+
 wire_t base_arrive(void)
 {
         for (u64 i = 0; i < WIRE_MAX; i++) {
-                if (!wire_table[i].in_use) {
-                        /* 世代号单调递增，0 保留给「无」 */
-                        wire_table[i].generation++;
-                        if (wire_table[i].generation == 0)
-                                wire_table[i].generation = 1;
+                if (wire_table[i].in_use || wire_table[i].retired)
+                        continue;
 
-                        wire_table[i].in_use = true;
-
-                        return WIRE_MAKE(wire_table[i].generation, (u32)(i + 1));
+                /*
+                 * 发号之前先判耗尽：若这一步无法产生更大的世代号，
+                 * 就让槽位退休，换下一个。绝不能回绕到 1。
+                 */
+                if (wire_table[i].generation >= WIRE_GEN_MAX) {
+                        wire_table[i].retired = true;
+                        wire_table[i].in_use = false;
+                        continue;
                 }
+
+                /* 世代号单调递增，0 保留给「无」 */
+                wire_table[i].generation++;
+
+                wire_table[i].in_use = true;
+
+                return WIRE_MAKE(wire_table[i].generation, (u32)(i + 1));
         }
 
-        /* 接线表满 */
+        /* 接线表满（或用尽的槽位已全部退役） */
         return WIRE_NONE;
 }
 

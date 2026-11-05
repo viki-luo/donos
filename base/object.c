@@ -125,12 +125,20 @@ wire_t object_plug(u32 unit, u64 period_ns)
                 if (objects[i].in_use)
                         continue;
 
-                wire_t w = base_arrive();
-                if (w == WIRE_NONE)
-                        return WIRE_NONE;
-
-                objects[i].in_use = true;
-                objects[i].wire = w;
+                /*
+                 * 两阶段发布：先把除接线以外的每个字段都初始化好，
+                 * 再向基座申请接线，最后才把接线写进去。
+                 *
+                 * 顺序就是正确性。旧实现先写 wire，再写 period_ns、frame、
+                 * cmd_motion、state、cap —— 而 find_by_wire() 只认
+                 * 「in_use 且 wire 相符」，于是那个窗口里这条接线已经
+                 * 可以收命令，而被判定所依据的 frame、速率上限、容量
+                 * 还是**上一个占用者**的值。命令不会失败，它会按错误的
+                 * 参照系被接受 —— 比拒绝危险得多。
+                 *
+                 * 现在接线是最后一个被写入的字段，因此「接线可见」与
+                 * 「状态就绪」是同一个瞬间。
+                 */
                 objects[i].frame = FRAME_WORLD;
                 objects[i].duration_ns = 0;
                 objects[i].dof = 0;
@@ -148,6 +156,13 @@ wire_t object_plug(u32 unit, u64 period_ns)
                 zero(&objects[i].cap, sizeof(objects[i].cap));
                 objects[i].described = false;
 
+                wire_t w = base_arrive();
+                if (w == WIRE_NONE)
+                        return WIRE_NONE;   /* 槽位未被占用，状态写回无害 */
+
+                objects[i].wire = w;
+                objects[i].in_use = true;   /* 发布点：此后才可被找到 */
+
                 return w;
         }
         return WIRE_NONE;
@@ -159,9 +174,15 @@ void object_unplug(wire_t w)
         if (o == 0)
                 return;
 
-        base_depart(w);
+        /*
+         * 先让物件不可再被找到，再交还接线。
+         *
+         * 反过来的话，接线已经失效而物件仍可被 find_by_wire 命中，
+         * 那是一个「基座说没有、物件说有」的矛盾窗口。
+         */
         o->in_use = false;
         o->wire = WIRE_NONE;
+        base_depart(w);
 }
 
 /* ------------------------------------------------------------------ */

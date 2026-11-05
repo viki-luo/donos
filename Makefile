@@ -237,8 +237,18 @@ $(HOST_TEST): tests/host/test_fixed.c base/fixed.c base/include/fixed.h \
 	@mkdir -p build/host
 	$(HOST_CC) $(HOST_CFLAGS) tests/host/test_fixed.c base/fixed.c -o $@
 
-host-test: $(HOST_TEST)
+# 白盒测试：整体包含 base/base.c 才能把接线表推到世代耗尽的边界。
+# 四十亿次热插拔不是测试，是等；而边界行为与真跑到底读的是同一张表。
+WIRE_TEST := build/host/test_wire.exe
+
+$(WIRE_TEST): tests/host/test_wire.c base/base.c base/include/base.h \
+              base/include/types.h
+	@mkdir -p build/host
+	$(HOST_CC) $(HOST_CFLAGS) tests/host/test_wire.c -o $@
+
+host-test: $(HOST_TEST) $(WIRE_TEST)
 	@$(HOST_TEST)
+	@$(WIRE_TEST)
 
 # MinGW 的 UBSan 运行库并非所有发行包都完整，因此使用 trap-on-error：
 # 编译器在任何 UB 点直接发出陷阱指令，不需要链接 sanitizer runtime。
@@ -249,6 +259,11 @@ sanitize:
 		tests/host/test_fixed.c base/fixed.c \
 		-o build/host/test_fixed_ubsan.exe
 	@build/host/test_fixed_ubsan.exe
+	$(HOST_CC) $(HOST_CFLAGS) -fsanitize=undefined \
+		-fsanitize-undefined-trap-on-error \
+		tests/host/test_wire.c \
+		-o build/host/test_wire_ubsan.exe
+	@build/host/test_wire_ubsan.exe
 
 check-release: check-symbols check-docs check-purity
 	@echo "=== 发布前门禁通过 / release gate passed ==="

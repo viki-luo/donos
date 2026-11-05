@@ -84,6 +84,10 @@
 
 ### Fixed / 修复
 
+- **世代号回绕让旧句柄复活**：接线表每个槽位的世代号到达 `0xFFFFFFFF` 后，上一次实现的「回绕成 0 就改回 1」会造出与**第一次使用**完全相同的句柄，旧大脑缓存的接线从此指向一个陌生物件；1 kHz 热插拔下约 50 天就会发生。现在世代号耗尽的槽位**永久退役**，分配器不再从它发号，句柄绝不复用
+  / **generation wraparound resurrected old handles**: once a wiring-table slot's generation reached `0xFFFFFFFF`, the old "wrap to 0, force back to 1" logic minted a handle identical to the **first-ever** use, so a brain caching that wire suddenly addressed a stranger; at 1 kHz hot-plug this takes about 50 days. A slot whose generation is exhausted now **retires permanently**, the allocator issues no further handles from it, and a handle is never reused
+- **热插拔时命令可能进了错误的参照系**：`object_plug()` 先把接线发布出去再初始化其余字段，而 `find_by_wire()` 只认接线字段 —— 窗口里命令会被接受，却按**上一个占用者**的 frame、周期与速率上限判定。现在接线是最后一个被写入的字段，可见即就绪；`object_unplug()` 也先置不可见再交还接线
+  / **a command could enter the wrong frame during hot-plug**: `object_plug()` published the wire before initialising the rest, and `find_by_wire()` matches on the wire fields alone — a command accepted in that window was judged by the **previous occupant's** frame, period and rate limit. The wire is now the last field written, visible-means-ready; `object_unplug()` likewise makes the object invisible before returning the wire
 - **非单位四元数被当作旋转使用**：`object_set_state()` 接受任意姿态，
   `rotate3()` 只把**全零**四元数当作「无旋转」。于是 (2,0,0,0) 或 (1,1,0,0)
   这样的输入会被当成合法旋转，把向量缩放两倍或 √2 倍 —— 错误表现成精度问题。
@@ -278,6 +282,10 @@
 
 ### Added / 新增
 
+- **接线世代纪律宿主白盒测试**（`tests/host/test_wire.c`，20 条）：直接包含 `base/base.c` 把接线表推到世代耗尽的边界，不再需要跑四十亿次热插拔；覆盖世代递增、复用不复活、耗尽即退役、全表耗尽报满、高地位别名拒绝、世代/槽位伪造拒绝、越界槽位拒绝、表满等
+  / **wiring-generations host white-box test** (`tests/host/test_wire.c`, 20 assertions): includes `base/base.c` directly to push the wiring table to the generation-exhaustion edge, avoiding four billion hot-plugs; covers increasing generations, reuse without resurrection, retirement on exhaustion, exhaustion reporting, high-bit alias rejection, generation/slot forgery rejection, out-of-range rejection, and a full table
+- **热插拔发布顺序验证段**（`base/verify.c` 第十三部分，双架构各 9 条）：旧占用者的命令数、位姿、能力申报、事件数与步数都不会泄漏到复用槽位的新占用者，新占用者带着自己声明的 unit 与周期出现
+  / **hot-plug publish-order section** (`base/verify.c`, part 13, 9 assertions per architecture): a reused slot's new occupant inherits none of the previous occupant's command, pose, capability, event count or step count, and appears with its own declared unit and period
 - **姿态合法性与解算成因验证段**（`base/verify.c` 第十二部分，双架构各 12 条）：
   全零姿态被接受为「未申报」、(2,0,0,0) 被拒、(1,1,0,0) 被拒、`INT64_MAX`
   分量被拒且不触发溢出、被拒姿态不扰动已有状态、合法单位四元数被接受并可读回、
