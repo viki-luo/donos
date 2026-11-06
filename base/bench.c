@@ -22,11 +22,32 @@
 #define RESOLVE_N     50000u
 #define TICK_N         2000u
 #define CHURN_N       20000u
+#define LATENCY_HIST_BINS 64u
+
+/*
+ * 100 Hz 满表推进的验收预算。
+ *
+ * p99.9 必须低于节拍的 50%，任何单次最大值必须低于 75%。
+ * 自动门禁在 QEMU -icount 模式下执行，以排除宿主调度暂停并形成可重复
+ * 的指令级回归基线。真实硬件仍必须复跑相同分位数，不能把 icount
+ * 结果当成真实芯片的纳秒或 WCET 证明。
+ */
+#define LATENCY_P999_BUDGET_PERMILLE 500u
+#define LATENCY_MAX_BUDGET_PERMILLE  750u
 
 #define CHAIN_DEPTH       7u    /* 7 hops, just under the depth limit of 8 */
 #define CHAIN_COUNT       8u    /* 8 chains x 8 objects = 64, the whole table */
 
 static int bench_failures;
+
+/* 满表 object_run 的逐次样本与精确尾部分位数。放在静态区，避免压栈。 */
+static u64 tick_samples[TICK_N];
+static u32 tick_hist[LATENCY_HIST_BINS];
+static u64 tick_avg;
+static u64 tick_p50;
+static u64 tick_p99;
+static u64 tick_p999;
+static u64 tick_max;
 
 /*
  * Submission instant used by the benchmark harness.
@@ -286,7 +307,64 @@ static void bench_resolve(void)
 /* 3. Worst-case tick: every object sits on the deepest chain           */
 /* ------------------------------------------------------------------ */
 
-static u32 bench_worst_tick(void)
+static u32 latency_bucket(u64 value)
+{
+        u32 bucket = 0;
+
+        while (value > 1u && bucket + 1u < LATENCY_HIST_BINS) {
+                value >>= 1;
+                bucket++;
+        }
+        return bucket;
+}
+
+static void heap_sift_down(u64 values[TICK_N], u32 root, u32 count)
+{
+        for (;;) {
+                u32 child = root * 2u + 1u;
+
+                if (child >= count)
+                        return;
+                if (child + 1u < count && values[child] < values[child + 1u])
+                        child++;
+                if (values[root] >= values[child])
+                        return;
+
+                u64 tmp = values[root];
+                values[root] = values[child];
+                values[child] = tmp;
+                root = child;
+        }
+}
+
+static void sort_tick_samples(void)
+{
+        for (u32 i = TICK_N / 2u; i > 0u; i--)
+                heap_sift_down(tick_samples, i - 1u, TICK_N);
+
+        for (u32 end = TICK_N; end > 1u; end--) {
+                u64 tmp = tick_samples[0];
+                tick_samples[0] = tick_samples[end - 1u];
+                tick_samples[end - 1u] = tmp;
+                heap_sift_down(tick_samples, 0u, end - 1u);
+        }
+}
+
+static void print_latency_histogram(void)
+{
+        arch_puts("  latency histogram (power-of-two counter ticks):\n");
+        for (u32 i = 0; i < LATENCY_HIST_BINS; i++) {
+                if (tick_hist[i] == 0u)
+                        continue;
+                arch_puts("    2^");
+                arch_putdec(i);
+                arch_puts(" bucket : ");
+                arch_putdec(tick_hist[i]);
+                arch_puts(" samples\n");
+        }
+}
+
+static u64 bench_worst_tick(void)
 {
     u32 built = 0;
     u32 placed = 0;
@@ -318,28 +396,50 @@ static u32 bench_worst_tick(void)
 
         u64 now = 1000000000ULL;
         u32 stepped = 0;
-        u64 t0 = arch_cycles();
+        u64 total = 0;
 
-        for (u32 i = 0; i < TICK_N; i++) {
-                now += 10000000ULL;
-                object_run(now, &stepped);
-        }
-        u64 cyc = (arch_cycles() - t0) / TICK_N;
+        /* 首次只排期，不进入分位数样本。此后 TICK_N 次全部是完整积分。 */
+        object_run(now, &stepped);
+        for (u32 i = 0; i < LATENCY_HIST_BINS; i++)
+                tick_hist[i] = 0;
 
         /*
-         * The first run of a newly built set only schedules, so exactly one
-         * of TICK_N runs is a scheduling pass rather than an integration
-         * pass. Say so instead of letting the average imply 2000 full runs.
+         * 这里测的是 object_run 自身的执行成本，不把异步定时器中断和
+         * 宿主 QEMU 调度暂停混进函数尾延迟。中断暴露的端到端延迟必须
+         * 单独测量并单独给预算，不能用它冒充函数 WCET，也不能把异常
+         * 离群值藏进平均数。关中断只包围逐次样本，测完立即恢复。
          */
-        arch_puts("  (of these runs, 1 is the first sighting: schedule only)\n");
+        arch_irq_disable();
+        for (u32 i = 0; i < TICK_N; i++) {
+                now += 10000000ULL;
+                u64 t0 = arch_cycles();
+                object_run(now, &stepped);
+                u64 elapsed = arch_cycles() - t0;
+
+                tick_samples[i] = elapsed;
+                tick_hist[latency_bucket(elapsed)]++;
+                total += elapsed;
+        }
+        arch_irq_enable();
+
+        tick_avg = total / TICK_N;
+        sort_tick_samples();
+        tick_p50 = tick_samples[(TICK_N * 500u) / 1000u - 1u];
+        tick_p99 = tick_samples[(TICK_N * 990u) / 1000u - 1u];
+        tick_p999 = tick_samples[(TICK_N * 999u) / 1000u - 1u];
+        tick_max = tick_samples[TICK_N - 1u];
 
         arch_puts("  full run over ");
         arch_putdec(placed);
         arch_puts(" objects (every free slot) on ");
         arch_putdec(built);
-        arch_puts(" turned chains : ");
-        arch_putdec(cyc);
-        arch_puts(" counter ticks/run\n");
+        arch_puts(" turned chains\n");
+        arch_puts("  latency average : "); arch_putdec(tick_avg); arch_puts(" counter ticks\n");
+        arch_puts("  latency p50     : "); arch_putdec(tick_p50); arch_puts(" counter ticks\n");
+        arch_puts("  latency p99     : "); arch_putdec(tick_p99); arch_puts(" counter ticks\n");
+        arch_puts("  latency p99.9   : "); arch_putdec(tick_p999); arch_puts(" counter ticks\n");
+        arch_puts("  latency max     : "); arch_putdec(tick_max); arch_puts(" counter ticks\n");
+        print_latency_histogram();
 
         /*
          * Release the whole chain here, not just the bookkeeping: this
@@ -349,7 +449,7 @@ static u32 bench_worst_tick(void)
          */
         release_tracked();
 
-        return (u32)cyc;
+        return tick_max;
 }
 
 /*
@@ -528,7 +628,7 @@ int bench_run(void)
 
         /* The sections above release every wire they took; the table is empty here. */
         arch_puts("\n=== measurement: worst-case tick ===\n\n");
-        u32 tick_cost = bench_worst_tick();
+        u64 tick_cost = bench_worst_tick();
 
         u64 per_tick = bench_cycles_per_tick();
         arch_puts("  one 100 Hz tick period : ");
@@ -536,9 +636,20 @@ int bench_run(void)
         arch_puts(" counter ticks\n");
 
         if (per_tick != 0u && tick_cost != 0u) {
-                arch_puts("  worst run share of a tick : ");
-                put_pct(tick_cost, per_tick);
+                arch_puts("  average run share of a tick : ");
+                put_pct(tick_avg, per_tick);
+                arch_puts("\n  p99.9 run share of a tick  : ");
+                put_pct(tick_p999, per_tick);
+                arch_puts("\n  max run share of a tick    : ");
+                put_pct(tick_max, per_tick);
                 arch_puts("\n");
+
+                check("latency budget: p99.9 is below 50% of one tick",
+                      tick_p999 <= (per_tick / 1000u) *
+                                  LATENCY_P999_BUDGET_PERMILLE);
+                check("latency budget: max is below 75% of one tick",
+                      tick_max <= (per_tick / 1000u) *
+                                 LATENCY_MAX_BUDGET_PERMILLE);
         }
 
         bench_stress();

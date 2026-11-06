@@ -282,6 +282,8 @@
 
 ### Added / 新增
 
+- **可重复的尾延迟门禁**：满表 `object_run` 逐次记录 2,000 个样本，输出平均值、p50、p99、p99.9、最大值与 2 的幂直方图。`tools/bench.sh` 使用 QEMU `-icount shift=0,align=off,sleep=off` 建立可重复的指令级回归基线；门禁要求 p99.9 小于一个 100 Hz 节拍的 50%，最大值小于 75%。普通 QEMU 的宿主调度离群值仍作为诊断信息，但不能冒充函数 WCET；真实硬件仍需单独验收
+  / **reproducible tail-latency gate**: a full-table `object_run` records 2,000 individual samples and reports average, p50, p99, p99.9, maximum and a power-of-two histogram. `tools/bench.sh` uses QEMU `-icount shift=0,align=off,sleep=off` for a reproducible instruction-level regression baseline; the gate requires p99.9 below 50% of one 100 Hz tick and maximum below 75%. Host-scheduling outliers from ordinary QEMU remain diagnostic evidence but are not presented as function WCET; real hardware still requires separate acceptance
 - **MMU 隔离的第一步**（双架构均带 `mmu failures = 0` 门禁标记）：x86_64 置位 EFER.NXE，把 2 MiB 以上的 511 个大页设为非可执行，并置位 CR0.WP（2 MiB 粒度限制下代码与数据仍同页，不是完整 W^X）；riscv64 建立 Sv39 页表，`.text` R|X、`.rodata` R、`.data`/`.bss`/栈 R|W，并映射 UART 与 PCIe 两个设备大页。仍无 U 态、无大脑沙箱
   / **first step of MMU isolation** (both architectures, `mmu failures = 0` gate marker): x86_64 sets EFER.NXE, marks all 511 2 MiB pages above the kernel page non-executable, and sets CR0.WP (code and data still share page 0 at this granularity, so it is not full W^X); riscv64 builds Sv39 tables with .text R|X, .rodata R, .data/.bss/stack R|W and maps the UART and PCIe device windows. Still no user mode and no brain sandbox
 - **基座之外的安全监视器**（`monitor/`，双架构自检 + 宿主边界测试）：`monitor_poll()` 不再调用 `object_run()`，调用者先推进执行层，再把 `object_run_status_t` 交给监视器观察。监视器只读现场、产出事件，从不调用 `base_apply`、从不写物件状态。目标侧与宿主侧测试共同核对轮询前后物件状态、执行时钟和步数完全不变；新增 `INT64_MIN` 实测速率测试，越界比较不再通过取绝对值引入有符号溢出。接线非预期消失只报告一次即注销

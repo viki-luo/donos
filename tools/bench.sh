@@ -48,25 +48,27 @@ run_x86_64() {
         echo "--- x86_64 (TSC 计数) ---"
         run_qemu build/bench-x86_64.log 30 \
                 qemu-system-x86_64 \
+                -icount shift=0,align=off,sleep=off \
                 -kernel build/x86_64/liteos.bin \
                 -m 256M \
                 -serial file:build/bench-x86_64.log \
                 -display none -no-reboot -no-shutdown
         tr -d '\r' < build/bench-x86_64.log | grep -E \
-                'free object|ticks/call|ticks/run|tick period|share|capacity =|churn cycles|bench failures|failures ='
+                'free object|ticks/call|latency (average|p50|p99 |p99.9|max)|histogram|bucket|tick period|run share|latency budget|capacity =|churn cycles|bench failures|failures ='
 }
 
 run_riscv64() {
         echo "--- riscv64 (time CSR 计数, 10 MHz) ---"
         run_qemu build/bench-riscv64.log 60 \
                 qemu-system-riscv64 \
+                -icount shift=0,align=off,sleep=off \
                 -machine virt -bios default -m 256M \
                 -kernel build/riscv64/liteos.bin \
                 -device e1000 \
                 -serial file:build/bench-riscv64.log \
                 -display none -no-reboot
         tr -d '\r' < build/bench-riscv64.log | grep -E \
-                'free object|ticks/call|ticks/run|tick period|share|capacity =|churn cycles|bench failures|failures ='
+                'free object|ticks/call|latency (average|p50|p99 |p99.9|max)|histogram|bucket|tick period|run share|latency budget|capacity =|churn cycles|bench failures|failures ='
 }
 
 for a in $ARCHES; do
@@ -82,10 +84,10 @@ done
 cat <<'NOTE'
 
 读这些数字时请注意三条：
-  1. 只有「同一次运行内的比值」可以当结论，例如
-     worst run share of a tick —— 它不依赖计数器刻度。
-  2. 每次调用的计数值在虚拟机里是宿主时间，不是芯片时间；
-     两者不可跨架构直接比绝对值。
-  3. riscv64 的计数器是 10 MHz（一格 100 ns），单次调用精度不足，
-     所以那里只测成批调用的平均值。
+  1. 只有同一次运行、同一计数器内的比值可以作为门禁结论，例如
+     p99.9 run share of a tick；绝对计数不可跨架构比较。
+  2. 普通 QEMU 运行会混入宿主调度暂停，曾测出超过一个节拍的虚假尾值；
+     门禁使用 -icount shift=0,align=off,sleep=off 固定指令推进，形成可重复基线。
+  3. icount 不是物理芯片时间。真实硬件仍需另跑同一分位数与预算，
+     不能把这里的计数值冒充真实纳秒或 WCET 证明。
 NOTE

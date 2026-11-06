@@ -31,4 +31,11 @@ u64 arch_cycles(void);
 /* 自开机以来的定时器节拍数。频率由架构层决定（两架构均为 100 Hz）。 */
 u64 arch_ticks(void);
 
+/*
+ * 基准测量临界区：只用于隔离 object_run 自身的执行延迟，避免异步
+ * 定时器中断混入函数级分位数。禁用时间必须短，测量结束后立即恢复。
+ */
+void arch_irq_enable(void);
+void arch_irq_disable(void);
+
 #endif /* LITEOS_REPORT_H */

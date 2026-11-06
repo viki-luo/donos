@@ -155,6 +155,24 @@ size: $(BUILD)/$(OUT)
 # What actually drags libgcc in is __int128 arithmetic without hardware
 # support (e.g. __multi3 on rv64iac), and soft float later on.
 # ---------------------------------------------------------------------
+bench-latency:
+	@set -e; \
+	$(MAKE) ARCH=x86_64 >/dev/null; \
+	$(MAKE) ARCH=riscv64 >/dev/null; \
+	rm -f build/bench-x86_64.log build/bench-riscv64.log; \
+	tools/bench.sh >/dev/null; \
+	for arch in x86_64 riscv64; do \
+		log=build/bench-$$arch.log; \
+		grep -q '^  latency p50     :' $$log || { echo "$$arch 缺少 p50"; exit 1; }; \
+		grep -q '^  latency p99     :' $$log || { echo "$$arch 缺少 p99"; exit 1; }; \
+		grep -q '^  latency p99.9   :' $$log || { echo "$$arch 缺少 p99.9"; exit 1; }; \
+		grep -q '^  latency max     :' $$log || { echo "$$arch 缺少 max"; exit 1; }; \
+		grep -q '^  latency histogram ' $$log || { echo "$$arch 缺少直方图"; exit 1; }; \
+		grep -q '^  ok   latency budget: p99.9 is below 50% of one tick$$' $$log || { echo "$$arch p99.9 超预算"; exit 1; }; \
+		grep -q '^  ok   latency budget: max is below 75% of one tick$$' $$log || { echo "$$arch max 超预算"; exit 1; }; \
+		echo "  ok   $$arch latency distribution"; \
+	done
+
 check:
 	@set -e; \
 	echo "=== 构建两个架构 / building both architectures ==="; \
@@ -317,5 +335,5 @@ sanitize:
 check-release: check-symbols check-docs check-purity
 	@echo "=== 发布前门禁通过 / release gate passed ==="
 
-check-all: check host-test fuzz sanitize check-release
+check-all: check bench-latency host-test fuzz sanitize check-release
 	@echo "=== 全部门禁通过 / all gates passed ==="

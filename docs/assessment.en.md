@@ -160,21 +160,22 @@ The security verdict must therefore be phrased as:
 
 ## 6. Is it “extremely fast”?
 
-Latest re-measurement on the same bench harness after the Sv39 and host-test fixes:
+The automated gate runs QEMU with `-icount shift=0,align=off,sleep=off`, using deterministic instruction advancement as a reproducible regression baseline. Ordinary QEMU runs produced host-scheduling outliers above one tick at p99.9 and above three ticks at max, so they cannot serve as a function-level budget gate. The following values are icount regression numbers, not physical nanoseconds or a WCET proof.
 
-| metric | x86_64 | riscv64 |
-|---|---|---|
-| `base_apply` accepted | 464.51 ticks/call | 1.82 ticks/call |
-| `base_apply` rejected | 103.52 ticks/call | 0.94 ticks/call |
-| `object_resolve` single chain (with frame rebase) | 429.38 ticks/call | 1.43 ticks/call |
-| `object_resolve` 8 chains | 144,463.37 ticks/call | 656.39 ticks/call |
-| full `object_run` (full table, 58/62 objects) | 6,524,314 ticks | 30,311 ticks |
-| one 100 Hz tick | 28,915,049 ticks | 91,616 ticks |
-| worst pass share of one tick | **22.56%** | **33.08%** |
+| full-table `object_run` metric | x86_64 (58 objects) | riscv64 (62 objects) |
+|---|---:|---:|
+| average | 732,413 ticks, 9.07% of one tick | 6,785 ticks, 7.74% |
+| p50 | 743,669 ticks | 6,888 ticks |
+| p99 | 745,286 ticks | 6,901 ticks |
+| p99.9 | 745,286 ticks, **9.23%** | 6,901 ticks, **7.87%** |
+| maximum | 745,286 ticks, **9.23%** | 6,901 ticks, **7.87%** |
+| histogram | 99 samples in the 2^18 bucket, 1,901 in 2^19 | all 2,000 samples in 2^12 |
 
-For the currently defined prototype workload, 100 Hz execution, at most 64 objects, and reference chains up to eight objects deep, the defensible statement is:
+The automated budgets are p99.9 below 50% of one 100 Hz tick and maximum below 75%; both architectures currently pass. Target interrupts are briefly disabled around the samples so this measures `object_run` itself. Interrupt-exposed end-to-end latency requires a separate storm scenario later in the plan.
 
-> The liteOS motion execution layer has real headroom on the prototype workload; the worst pass consumes roughly two to three tenths of one tick.
+For the currently defined prototype workload, the defensible statement is:
+
+> liteOS meets the current function-level tail-latency budgets on the deterministic QEMU regression baseline; real hardware and end-to-end real-time behavior are not yet accepted.
 
 The following statement is not supported:
 
