@@ -94,7 +94,7 @@ static bool abs_diff(motion_fixed_t a, motion_fixed_t b, motion_fixed_t *out)
         return true;
 }
 
-monitor_stats_t monitor_poll(u64 now_ns, u32 *stepped)
+monitor_stats_t monitor_poll(object_run_status_t run_status)
 {
         monitor_stats_t st;
         u32 events = 0;
@@ -103,11 +103,8 @@ monitor_stats_t monitor_poll(u64 now_ns, u32 *stepped)
         st.alive = 0;
         st.events = 0;
 
-        /*
-         * 执行层推进。监视器只**看**它是否接受这个时刻，不代为处理：
-         * 接受与否是执行层的事实，修不修由上层决定。
-         */
-        if (object_run(now_ns, stepped) != OBJECT_RUN_OK)
+        /* The caller advances execution; the monitor only observes its result. */
+        if (run_status != OBJECT_RUN_OK)
                 report(MON_E_CLOCK, 0, &events);
 
         for (u32 i = 0; i < MONITOR_MAX; i++) {
@@ -178,10 +175,12 @@ monitor_stats_t monitor_poll(u64 now_ns, u32 *stepped)
                         object_state_t s;
 
                         if (object_state(e->wire, &s)) {
-                                motion_fixed_t mag = s.linear[0] < 0
-                                        ? -s.linear[0] : s.linear[0];
+                                motion_fixed_t rate = s.linear[0];
+                                motion_fixed_t limit = cap.max_rate[0];
 
-                                if (cap.max_rate[0] > 0 && mag > cap.max_rate[0])
+                                /* Compare without negating INT64_MIN. */
+                                if (limit > 0 &&
+                                    (rate > limit || rate < -limit))
                                         report(MON_E_RATE, e->wire, &events);
                         }
                 }

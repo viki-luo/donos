@@ -101,32 +101,35 @@ int monitor_verify(void)
         monitor_watch(ok1);
         seen_reset();
 
+        bool unchanged = true;
+        bool execution_ok = true;
         for (u32 k = 1; k <= 5; k++) {
-                monitor_poll(now + k * MILLI, &stepped);
-
-                /* 每次轮询后状态必须原样：监视器不是干预者 */
+                object_run_status_t status = object_run(now + k * MILLI, &stepped);
                 object_state_t a, b;
-                if (object_state(ok1, &a)) {
-                        monitor_poll(now + k * MILLI + 1, &stepped);
-                        if (object_state(ok1, &b) && !same_state(&a, &b)) {
-                                mcheck("a poll does not change any object state",
-                                       false);
-                                goto next_section;
-                        }
-                }
+                u64 clock_before = object_now_ns();
+                u32 steps_before = object_step_count(ok1);
+
+                execution_ok = execution_ok && status == OBJECT_RUN_OK;
+                bool have_before = object_state(ok1, &a);
+                monitor_poll(status);
+                bool have_after = object_state(ok1, &b);
+                unchanged = unchanged && have_before && have_after &&
+                            same_state(&a, &b) &&
+                            object_now_ns() == clock_before &&
+                            object_step_count(ok1) == steps_before;
         }
 
+        mcheck("the caller advances execution successfully", execution_ok);
         mcheck("a healthy scene produces no events", seen_events == 0);
-        mcheck("a poll does not change any object state", true);
+        mcheck("poll preserves state, execution clock and step count", unchanged);
 
-next_section:
         /* ---- 非预期消失 ---- */
         seen_reset();
         {
                 wire_t doomed = object_plug(2, MILLI);
                 monitor_watch(doomed);
                 object_unplug(doomed);          /* 没有调用 monitor_forget */
-                monitor_poll(now + 10 * MILLI, &stepped);
+                monitor_poll(OBJECT_RUN_OK);
                 mcheck("an unregistered departure is reported as WIRE_LOST",
                        seen_events >= 1 && seen_is(MON_E_WIRE_LOST));
         }
@@ -138,7 +141,7 @@ next_section:
                 monitor_watch(gone);
                 monitor_forget(gone);           /* 先注销，再离开 */
                 object_unplug(gone);
-                monitor_poll(now + 11 * MILLI, &stepped);
+                monitor_poll(OBJECT_RUN_OK);
                 mcheck("a registered departure is not reported as a fault",
                        seen_events == 0);
         }
@@ -155,7 +158,7 @@ next_section:
                 base_apply(now, &ev);
 
                 monitor_watch(c1);
-                monitor_poll(now + 12 * MILLI, &stepped);
+                monitor_poll(OBJECT_RUN_OK);
                 mcheck("a cycle is reported as RESOLVE, not silently ignored",
                        seen_is(MON_E_RESOLVE));
 
@@ -186,9 +189,16 @@ next_section:
                 object_set_state(fast, &st);
 
                 monitor_watch(fast);
-                monitor_poll(now + 13 * MILLI, &stepped);
+                monitor_poll(OBJECT_RUN_OK);
                 mcheck("a measured speed above the declared limit is reported",
                        seen_is(MON_E_RATE));
+
+                seen_reset();
+                st.linear[0] = INT64_MIN;
+                bool accepted = object_set_state(fast, &st);
+                monitor_poll(OBJECT_RUN_OK);
+                mcheck("INT64_MIN measured speed reports RATE without signed overflow",
+                       accepted && seen_is(MON_E_RATE));
 
                 monitor_forget(fast);
                 object_unplug(fast);
@@ -196,7 +206,7 @@ next_section:
 
         /* ---- 执行层拒绝时刻 ---- */
         seen_reset();
-        monitor_poll(0, &stepped);              /* 回退到 0：必被拒绝 */
+        monitor_poll(object_run(0, &stepped)); /* 调用者推进被拒，监视器只观察结果 */
         mcheck("a refused instant is reported as CLOCK",
                seen_is(MON_E_CLOCK));
 

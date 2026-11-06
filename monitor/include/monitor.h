@@ -18,7 +18,7 @@
 #ifndef LITEOS_MONITOR_H
 #define LITEOS_MONITOR_H
 
-#include "base.h"
+#include "object.h"
 
 typedef enum {
         MON_OK = 0,
@@ -51,10 +51,11 @@ bool monitor_watch(wire_t w);
 void monitor_forget(wire_t w);
 
 /*
- * 轮询一次：读现场、产生事件、什么都不改。
- * now_ns 用于执行层推进；返回值是本次产生的事件数。
+ * 只观察现场并返回统计，不推进执行层、不修改物件状态。
+ * run_status 是调用者单独推进执行层后得到的返回值。
+ * 事件接收回调也必须遵守不修改物件状态的约定。
  */
-monitor_stats_t monitor_poll(u64 now_ns, u32 *stepped);
+monitor_stats_t monitor_poll(object_run_status_t run_status);
 
 /* 「实测与命令的偏差」判定阈值（Q32.32）。 */
 void monitor_set_drift_limit(motion_fixed_t limit);
