@@ -103,57 +103,47 @@ x86_64 has 58 free slots because PCI discovery keeps six devices online. The ris
 
 ### 4.2 Confirmed security gaps
 
-#### x86_64
+#### x86_64 (currently installed)
+- EFER.NXE is set; all 511 2 MiB pages from 2 MiB up carry NX. The kernel's own page 0 (code, .rodata, .data/stack share it) remains RWX because 2 MiB is the only available page granularity.
+- CR0.WP is set: even kernel-mode writes must honour the writable bit. No page is currently marked read-only, so WP only wires up the semantics; it does not yet intercept any write.
+- This is not full W^X: code and data still share page 0. True code RX / data RW+NX requires a 4 KiB table rebuild, out of scope for this phase.
 
-The kernel reports:
-
+#### riscv64 (currently installed)
 ```text
-cr0 = 0x0000000080000011  (PG=1 WP=0)
-cr4 = 0x0000000000000020  (PAE=1)
-cr3 = 0x0000000000070000
-pd[0] = 0x00000000000000e3  (P=1 RW=1 US=0 NX=0)
-pd[1] = 0x0000000000200083  (P=1 RW=1 US=0 NX=0)
+satp = 0x8000000000080217  (MODE=8 Sv39)
 ```
-
-Paging is active, but `CR0.WP` is clear. Mappings are writable and executable, with no user mapping and no NX isolation. Kernel code, data, and an upper brain have no MMU sandbox boundary.
-
-#### riscv64
-
-The kernel reports:
-
-```text
-satp = 0x0000000000000000  (MODE=0 Bare)
-```
-
-S-mode performs no address translation and has no page-level permission boundary. The upper brain has the same privilege as the base.
+- Sv39 with 4 KiB pages is enabled: .text R|X, .rodata R, .data/.bss/stack R|W; UART (0x10000000) and PCIe ECAM (0x30000000) each map one 2 MiB megapage R|W.
+- Still no U-mode: S-mode can rewrite satp, so this blocks wrong-address accesses; it does not stop a malicious kernel from rebuilding its tables.
+- PMP and paging are independent checks: a PMP pass does not replace paging; devices must sit inside the table.
 
 #### Common architectural gaps
 
 - No user-mode process or privilege separation.
-- No W^X, NX enforcement, or read-only kernel-data protection.
+- x86_64 is not full W^X (2 MiB granularity); riscv64 reaches W^X but has no U-mode.
 - No upper-brain sandbox; a faulty or malicious brain can corrupt the base and other objects.
 - The base deliberately grants no authority distinctions: a caller holding a valid handle can, in principle, command any live wire.
 - Limits and maximum rates declared by objects are not enforced by the base.
 - `base/` and `object.c` contain no locks and make no SMP, preemption, or interrupt-context reentrancy guarantee.
 - The build uses `-fno-stack-protector` and has no stack guard page.
-- Each slot has a 32-bit generation; roughly `2^32` reuses of one slot create a theoretical ABA risk.
-- There is no fuzzing, formal proof, static-analysis gate, or hardware fault-injection campaign yet.
+- Each slot has a 32-bit generation; an exhausted generation retires the slot permanently rather than wrapping (a deployment-level refusal, not an infinite budget).
+- A deterministic fuzz corpus (`tests/host/fuzz_base.c`) and a generation-exhaustion white-box test (`tests/host/test_wire.c`) exist, but there is no formal proof or hardware fault-injection campaign yet.
 
 The security verdict must therefore be phrased as:
 
-> liteOS has demonstrated sound rejection behavior at handle and capacity boundaries, but it has not established execution isolation, authority isolation, or a memory-safety boundary.
+> liteOS has demonstrated sound rejection behavior at handle and capacity boundaries and page-level permissions are now enabled on both architectures (x86_64 NX+WP to the extent the current granularity allows; riscv64 Sv39 reaching W^X). It still has no user mode and no brain sandbox, and no authority model; production memory security is not yet achieved.
 
 ## 5. Reliability assessment
 
 ### Demonstrated
 
 - Both architectures execute the same base semantics.
-- Semantic and stress suites finish with zero failures.
+- Semantic and stress suites finish with zero failures, with gate markers for `failures / bench failures / brain failures / monitor failures / mmu failures`.
 - A late run does not apply multiple catch-up steps in one call.
 - Position remains consistent with actual execution count. For example, motion 3 over 99 steps produces position 297.
-- riscv64 programs its timer through SBI TIME, avoiding direct S-mode access to the PMP-protected CLINT.
-- Interrupt handlers only count ticks; complex object execution remains in the main loop.
+- riscv64 programs its timer through SBI TIME, avoiding direct S-mode access to the PMP-protected CLINT. The timer interrupt only counts ticks; complex object execution remains in the main loop.
 - Temporary self-test and benchmark objects are released.
+- riscv64 Sv39 translation is active and verified through a real three-level walk; x86_64 NXE and CR0.WP are set.
+- The deterministic fuzz corpus (with falsifiable mutants measured) and the generation-exhaustion white-box test are both in the CI gate.
 
 ### An important observed behavior
 
@@ -170,9 +160,21 @@ The security verdict must therefore be phrased as:
 
 ## 6. Is it “extremely fast”?
 
+Latest re-measurement on the same bench harness after the Sv39 and host-test fixes:
+
+| metric | x86_64 | riscv64 |
+|---|---|---|
+| `base_apply` accepted | 464.51 ticks/call | 1.82 ticks/call |
+| `base_apply` rejected | 103.52 ticks/call | 0.94 ticks/call |
+| `object_resolve` single chain (with frame rebase) | 429.38 ticks/call | 1.43 ticks/call |
+| `object_resolve` 8 chains | 144,463.37 ticks/call | 656.39 ticks/call |
+| full `object_run` (full table, 58/62 objects) | 6,524,314 ticks | 30,311 ticks |
+| one 100 Hz tick | 28,915,049 ticks | 91,616 ticks |
+| worst pass share of one tick | **22.56%** | **33.08%** |
+
 For the currently defined prototype workload, 100 Hz execution, at most 64 objects, and reference chains up to eight objects deep, the defensible statement is:
 
-> The liteOS motion execution layer has substantial headroom. Its measured worst pass consumes about 1% to 2% of a tick period.
+> The liteOS motion execution layer has real headroom on the prototype workload; the worst pass consumes roughly two to three tenths of one tick.
 
 The following statement is not supported:
 
@@ -181,11 +183,6 @@ The following statement is not supported:
 The current tests run in QEMU with a fixed workload and do not include a real control loop, SMP, cache pressure, network interrupt storms, or silicon measurements.
 
 ## 7. Required work before production security
-
-1. **Establish execution isolation**
-   - On x86_64, set `CR0.WP` and map code RX, read-only data R, and data/stack RW+NX.
-   - On riscv64, enable Sv39 and create page-level privilege boundaries.
-   - Run upper brains at lower privilege or in separate address spaces.
 
 2. **Add authority without contaminating the motion ontology**
    - Keep authorization in wiring management or an upper policy layer, not in `motion_event_t`.

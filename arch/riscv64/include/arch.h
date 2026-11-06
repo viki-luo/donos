@@ -77,4 +77,35 @@ u64 arch_cycles(void);
  */
 void arch_report_protection(void);
 
+/* ------------------------------------------------------------------ */
+/* MMU 隔离（Sv39，只打开内核自己需要的那部分映射）                     */
+/* ------------------------------------------------------------------ */
+
+/*
+ * 建立 Sv39 页表并切换到它。映射范围是 0..4 MiB 的恒等映射：
+ * 代码 R|X、只读数据 R、其余 .data/.bss/栈/页表 R|W。
+ * UART 与 PCIe ECAM 各映射一个 2 MiB 大页；PMP 放行并不能替代分页，
+ * 因为 PMP 与页表是两道独立检查。
+ *
+ * 返回 0 表示成功；负值表示失败，此时仍停在 Bare 模式上，机器可用。
+ */
+int arch_mmu_init(void);
+
+/* 读 satp 当前值（用于自检打印与判定）。 */
+u64 arch_satp(void);
+
+/* 走一遍页表，把某一页的权限位读回来（page 是从 KERNEL_BASE 起算的页号）。 */
+u64  arch_mmu_walk(u64 page);
+
+/* 同上，一次取代码 / 只读 / 数据三个探针页。 */
+void arch_mmu_walk3(u64 out[3]);
+
+/* Sv39 权限位，供自检比对。 */
+#define PTE_R 0x002ULL
+#define PTE_W 0x004ULL
+#define PTE_X 0x008ULL
+
+/* 打印并核对当前保护状态；返回失败计数。 */
+int arch_mmu_verify(void);
+
 #endif /* LITEOS_ARCH_H */

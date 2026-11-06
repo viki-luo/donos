@@ -95,4 +95,35 @@ u64 arch_cycles(void);
  */
 void arch_report_protection(void);
 
+/* ------------------------------------------------------------------ */
+/* MMU 隔离（W^X 中能真正装上的那一部分）                               */
+/* ------------------------------------------------------------------ */
+
+/*
+ * 打开 EFER.NXE。CPU 不支持时返回 false —— 调用者必须据此决定是否
+ * 报告「支持不可执行页」，而不是无条件声称已经支持。
+ */
+bool arch_mmu_enable_nx(void);
+
+/* 把 2 MiB 及以上的大页标为不可执行，返回实际标记的页数。 */
+u32 arch_mmu_mark_data_nx(void);
+
+/* 打开 CR0.WP：内核态写也必须遵守页表项的可写位。 */
+bool arch_mmu_enable_wp(void);
+
+/* 读某一 2 MiB 页的页目录项。 */
+u64 arch_mmu_entry(u32 page_2mib);
+
+/* 改某一 2 MiB 页的可写位，返回该项原值（用于复原）。 */
+u64 arch_mmu_set_writable(u32 page_2mib, bool writable);
+
+/*
+ * 强行拨动 CR0.WP，用于证明「权限位 + 保护位」缺一不可：
+ * 项标了只读而 WP=0 时，内核态照样写得进去。
+ */
+void arch_mmu_set_wp(bool on);
+
+/* 打印并修正保护状态；返回失败计数。 */
+int arch_mmu_verify(void);
+
 #endif /* LITEOS_ARCH_H */

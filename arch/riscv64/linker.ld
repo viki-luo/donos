@@ -11,31 +11,44 @@ SECTIONS
 {
         . = 0x80200000;
 
-        .text : {
+        .text : ALIGN(4K) {
+                __text_start = .;
                 *(.text.boot)
                 *(.text .text.*)
+                . = ALIGN(4K);
+
+                /*
+                 * .rodata 与栈之间必须各自对齐到 4 KiB：
+                 * Sv39 的权限以 4 KiB 页为单位，跨页的段
+                 * 会让「只读页」里混进可写内容（或反过来）。
+                 */
+                __text_end = .;
+                __rodata_start = .;
         }
 
-        .rodata : ALIGN(16) {
+        .rodata : ALIGN(4K) {
                 *(.rodata .rodata.* .srodata .srodata.*)
-        }
-
-        .data : ALIGN(16) {
-                *(.data .data.* .sdata .sdata.*)
-        }
-
-        .bss : ALIGN(16) {
+                . = ALIGN(4K);
+                __rodata_end = .;
+                __data_start = .;
                 __bss_start = .;
+        }
+
+        .data : ALIGN(4K) {
+                *(.data .data.* .sdata .sdata.*)
                 *(.sbss .sbss.*)
                 *(.bss .bss.*)
                 *(COMMON)
                 . = ALIGN(8);
+                __data_end = .;
                 __bss_end = .;
+                __stack_bottom = .;
         }
 
-        . = ALIGN(16);
+        . = ALIGN(4K);
         . += 64 * 1024;
         __stack_top = .;
+
 
         /DISCARD/ : {
                 *(.comment)

@@ -282,6 +282,8 @@
 
 ### Added / 新增
 
+- **MMU 隔离的第一步**（双架构均带 `mmu failures = 0` 门禁标记）：x86_64 置位 EFER.NXE，把 2 MiB 以上的 511 个大页设为非可执行，并置位 CR0.WP（2 MiB 粒度限制下代码与数据仍同页，不是完整 W^X）；riscv64 建立 Sv39 页表，`.text` R|X、`.rodata` R、`.data`/`.bss`/栈 R|W，并映射 UART 与 PCIe 两个设备大页。仍无 U 态、无大脑沙箱
+  / **first step of MMU isolation** (both architectures, `mmu failures = 0` gate marker): x86_64 sets EFER.NXE, marks all 511 2 MiB pages above the kernel page non-executable, and sets CR0.WP (code and data still share page 0 at this granularity, so it is not full W^X); riscv64 builds Sv39 tables with .text R|X, .rodata R, .data/.bss/stack R|W and maps the UART and PCIe device windows. Still no user mode and no brain sandbox
 - **基座之外的安全监视器**（`monitor/`，双架构各 7 条自检）：只在基座之上读现场并产出事件（接线非预期消失、解算失败、实测与命令偏差、实测越过自报上限、执行层拒绝时刻），**从不调用 `base_apply`、从不写物件状态**。这一点由自检验证：一次轮询前后每个物件逐字段相同。接线非预期消失只报一次即注销，避免重复告警淹掉后续现场
   / **out-of-base safety monitor** (`monitor/`, 7 assertions per architecture): it reads the scene above the base and emits events (unexpected wire loss, failed resolution, measured-versus-commanded drift, measured speed above a declared limit, a refused instant) and **never calls `base_apply` and never writes object state**, which the self-test proves by comparing every object field before and after a poll. An unexpected wire loss is reported once and deregistered so repeated alarms cannot drown out later evidence
 - **上层大脑与大脑热切换**（`brain/`，双架构各 14 条自检 + 实机演示）：一个大脑只是「一条普通接线 + 决策周期 + 只读目标与当前时刻的决策函数」，`base/base.c` 里连 `brain` 这个词都被 `make check-purity` 禁止。两个控制律不同的大脑 `cruise`/`shuttle` 在运行 2 秒时热切换：新大脑读物件自持的实测位置做出反向决策（1.989 m → 1.490 m，恰为 -0.5 m/s × 1 s），**没有任何交接物**

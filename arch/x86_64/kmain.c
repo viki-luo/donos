@@ -94,6 +94,16 @@ void kernel_main(u32 magic, u32 info)
         arch_puts("\n--- protection: what the MMU actually enforces ---\n");
         arch_report_protection();
 
+        /*
+         * ---- 4.5 MMU 隔离 ----
+         *
+         * 上一步打印的是**装保护之前**的事实。这一步把能装的装上：
+         * NXE 置位、2 MiB 以上的大页不可执行、CR0.WP 置位（内核写也
+         * 要守只读位）。装完自报，两次输出放在一起，差别自己看得出来。
+         */
+        if (arch_mmu_verify() != 0)
+                arch_puts("\n!! MMU isolation did not take\n");
+
         /* ---- 5. 验证 ---- */
         base_verify();
 

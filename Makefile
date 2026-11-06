@@ -173,6 +173,7 @@ check:
 		grep -qE '^  bench failures = 0$$' $$log || { echo "$$arch 压力测试失败"; grep -E 'bench failures' $$log; exit 1; }; \
 		grep -qE '^  monitor failures = 0$$' $$log || { echo "$$arch 监视器自检失败"; grep -E 'monitor failures' $$log; exit 1; }; \
 		grep -qE '^  brain failures = 0$$' $$log || { echo "$$arch 大脑热切换自检失败"; grep -E 'brain failures' $$log; exit 1; }; \
+		grep -qE '^  mmu failures = 0$$' $$log || { echo "$$arch MMU 自检失败"; grep -E 'mmu failures' $$log; exit 1; }; \
 		grep -q 'protection: what the MMU actually enforces' $$log || { echo "$$arch 未自报保护状态"; exit 1; }; \
 		if logs=$$($(NM) build/$$arch/liteos.bin 2>/dev/null | grep ' U ' | awk '{print $$2}'); \
 		   [ -n "$$logs" ]; then \

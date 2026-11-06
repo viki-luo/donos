@@ -59,6 +59,17 @@ void kernel_main(u64 hartid, u64 dtb)
         arch_puts("\n--- protection: what the MMU actually enforces ---\n");
         arch_report_protection();
 
+        /*
+         * 装 Sv39 页表。这一步之后还能打印出东西，本身就是翻译生效的证据；
+         * 装不上就停在 Bare 上继续跑，并把原因报出来 —— 静默降级不可接受。
+         */
+        if (arch_mmu_init() == 0) {
+                if (arch_mmu_verify() != 0)
+                        arch_puts("\n!! page permissions are not W^X\n");
+        } else {
+                arch_puts("\n!! arch_mmu_init failed; staying in Bare mode\n");
+        }
+
         base_verify();
 
         /*
