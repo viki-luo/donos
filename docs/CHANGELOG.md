@@ -282,6 +282,8 @@
 
 ### Added / 新增
 
+- **体积与静态内存预算门禁**：`tools/size.sh` 以 ELF 已分配段统一计算两个架构的加载体积，并分别统计静态 RAM、静态栈与页表占用；`make check-size` 对 x86_64 执行 224 KiB 加载体积、192 KiB 静态 RAM、64 KiB 栈预算，对 riscv64 执行 160 KiB、192 KiB、72 KiB 预算。避免依赖当前无法识别 riscv64 ELF 的宿主 `objcopy`
+  / **image and static-memory budget gate**: `tools/size.sh` uses allocated ELF sections for one cross-architecture load-size definition and separately accounts for static RAM, reserved stack and page tables. `make check-size` enforces x86_64 budgets of 224 KiB load size, 192 KiB static RAM and 64 KiB stack, and riscv64 budgets of 160 KiB, 192 KiB and 72 KiB, without depending on the host `objcopy` that cannot recognise the riscv64 ELF
 - **可重复的尾延迟门禁**：满表 `object_run` 逐次记录 2,000 个样本，输出平均值、p50、p99、p99.9、最大值与 2 的幂直方图。`tools/bench.sh` 使用 QEMU `-icount shift=0,align=off,sleep=off` 建立可重复的指令级回归基线；门禁要求 p99.9 小于一个 100 Hz 节拍的 50%，最大值小于 75%。普通 QEMU 的宿主调度离群值仍作为诊断信息，但不能冒充函数 WCET；真实硬件仍需单独验收
   / **reproducible tail-latency gate**: a full-table `object_run` records 2,000 individual samples and reports average, p50, p99, p99.9, maximum and a power-of-two histogram. `tools/bench.sh` uses QEMU `-icount shift=0,align=off,sleep=off` for a reproducible instruction-level regression baseline; the gate requires p99.9 below 50% of one 100 Hz tick and maximum below 75%. Host-scheduling outliers from ordinary QEMU remain diagnostic evidence but are not presented as function WCET; real hardware still requires separate acceptance
 - **MMU 隔离的第一步**（双架构均带 `mmu failures = 0` 门禁标记）：x86_64 置位 EFER.NXE，把 2 MiB 以上的 511 个大页设为非可执行，并置位 CR0.WP（2 MiB 粒度限制下代码与数据仍同页，不是完整 W^X）；riscv64 建立 Sv39 页表，`.text` R|X、`.rodata` R、`.data`/`.bss`/栈 R|W，并映射 UART 与 PCIe 两个设备大页。仍无 U 态、无大脑沙箱

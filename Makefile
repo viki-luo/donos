@@ -332,8 +332,15 @@ sanitize:
 		-o build/host/fuzz_base_ubsan.exe
 	@build/host/fuzz_base_ubsan.exe 50000
 
+check-size:
+	@set -e; \
+	$(MAKE) ARCH=x86_64 >/dev/null; \
+	$(MAKE) ARCH=riscv64 >/dev/null; \
+	tools/size.sh | tee build/size.log; \
+	grep -q '^  size failures = 0$$' build/size.log || { echo "体积或静态内存超出预算"; exit 1; }
+
 check-release: check-symbols check-docs check-purity
 	@echo "=== 发布前门禁通过 / release gate passed ==="
 
-check-all: check bench-latency host-test fuzz sanitize check-release
+check-all: check bench-latency check-size host-test fuzz sanitize check-release
 	@echo "=== 全部门禁通过 / all gates passed ==="

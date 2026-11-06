@@ -158,7 +158,27 @@ The security verdict must therefore be phrased as:
 - Multi-level PCI bridges and runtime riscv64 PCIe hot-plug.
 - Real-hardware cache, memory-ordering, and timing behavior.
 
-## 6. Is it “extremely fast”?
+## 6. Is it “small”?
+
+The size gate uses allocated ELF sections rather than the host `objcopy --strip-debug` file length. The installed GNU `objcopy` handles x86_64 but does not recognise the riscv64 ELF, so stripped-file comparison would silently apply different definitions to the two architectures.
+
+| metric | x86_64 | riscv64 |
+|---|---:|---:|
+| `.text` | 57,663 B | 45,056 B |
+| `.rodata` | 12,472 B | 16,384 B |
+| `.data` under each linker layout | 122,880 B | 69,664 B |
+| ELF allocated load size | 193,035 B | 131,104 B |
+| page tables | 12,288 B, three fixed low pages | 16,384 B, four Sv39 tables already inside `.data` |
+| reserved static stack | 65,536 B | 69,600 B |
+| static-RAM accounting | 135,168 B | 139,264 B |
+
+Automated budgets are: x86_64 load size at most 224 KiB, static RAM at most 192 KiB and stack at most 64 KiB; riscv64 load size at most 160 KiB, static RAM at most 192 KiB and stack at most 72 KiB. `make check-size` fails on any overrun.
+
+“Static RAM” is a reproducible link-time budget. It excludes device MMIO, QEMU/OpenSBI firmware and any future runtime dynamic peak. There is currently no dynamic allocator; adding one requires a separate runtime high-water gate.
+
+> Under this explicit budget definition, both architectures qualify as lightweight prototypes. This is not an absolute small-size claim for every deployment.
+
+## 7. Is it “extremely fast”?
 
 The automated gate runs QEMU with `-icount shift=0,align=off,sleep=off`, using deterministic instruction advancement as a reproducible regression baseline. Ordinary QEMU runs produced host-scheduling outliers above one tick at p99.9 and above three ticks at max, so they cannot serve as a function-level budget gate. The following values are icount regression numbers, not physical nanoseconds or a WCET proof.
 
@@ -183,7 +203,7 @@ The following statement is not supported:
 
 The current tests run in QEMU with a fixed workload and do not include a real control loop, SMP, cache pressure, network interrupt storms, or silicon measurements.
 
-## 7. Required work before production security
+## 8. Required work before production security
 
 2. **Add authority without contaminating the motion ontology**
    - Keep authorization in wiring management or an upper policy layer, not in `motion_event_t`.
@@ -201,7 +221,7 @@ The current tests run in QEMU with a fixed workload and do not include a real co
    - Build and run both architectures plus `tools/bench.sh` in CI.
    - Add clang static analysis, host-side UBSan tests, fuzzing, and soak testing.
 
-## 8. Final verdict
+## 9. Final verdict
 
 | Dimension | Verdict |
 |---|---|
