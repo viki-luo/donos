@@ -13,6 +13,36 @@
 
 static int mfail;
 
+/*
+ * Real permission probes, not page-table-bit assertions:
+ * - ro_probe_word is placed in .rodata (R, no W).
+ * - nx_probe_word is placed in writable .data/.bss (RW, no X).
+ */
+static const u64 ro_probe_word = 0x524f5f50524f4245ULL;
+static u32 nx_probe_word __attribute__((aligned(4))) = 0x00008067u;
+
+static bool verify_fault_result(const char *what, u64 want_cause,
+                                u64 want_sepc, u64 want_stval)
+{
+        u64 cause = 0;
+        u64 sepc = 0;
+        u64 stval = 0;
+        bool seen = arch_fault_result(&cause, &sepc, &stval);
+        bool ok = seen && cause == want_cause && sepc == want_sepc &&
+                  stval == want_stval;
+
+        arch_puts("  note: ");
+        arch_puts(what);
+        arch_puts(" scause=0x");
+        arch_puthex64(cause);
+        arch_puts(" sepc=0x");
+        arch_puthex64(sepc);
+        arch_puts(" stval=0x");
+        arch_puthex64(stval);
+        arch_puts("\n");
+        return ok;
+}
+
 static void mcheck(const char *what, bool ok)
 {
         arch_puts(ok ? "  ok   " : "  FAIL ");
@@ -48,6 +78,36 @@ int arch_mmu_verify(void)
                probe[1] == PTE_R);
         mcheck("a writable data page is readable and writable, not executable",
                probe[2] == (PTE_R | PTE_W));
+
+        /*
+         * Fault injection #1: a real store into an R-only page. The trap
+         * dispatcher must observe store page fault (15), exact sepc/stval,
+         * replace sepc with the exported resume label, and return normally.
+         */
+        const u64 ro_before = ro_probe_word;
+        arch_fault_expect(15u,
+                          (u64)(uintptr_t)arch_probe_store_fault,
+                          (u64)(uintptr_t)&ro_probe_word,
+                          (u64)(uintptr_t)arch_probe_store_resume);
+        arch_probe_store_ro((void *)(uintptr_t)&ro_probe_word);
+        mcheck("hardware blocks a store to an R-only page (scause 15)",
+               verify_fault_result("store/R-only", 15u,
+                                   (u64)(uintptr_t)arch_probe_store_fault,
+                                   (u64)(uintptr_t)&ro_probe_word));
+        mcheck("the rejected store leaves read-only data unchanged",
+               ro_probe_word == ro_before);
+
+        /* Fault injection #2: execute from the RW/NX data page. */
+        arch_fault_expect(12u,
+                          (u64)(uintptr_t)&nx_probe_word,
+                          (u64)(uintptr_t)&nx_probe_word,
+                          (u64)(uintptr_t)arch_probe_exec_resume);
+        arch_probe_exec_nx((void *)(uintptr_t)&nx_probe_word);
+        mcheck("hardware blocks instruction fetch from an RW/NX page (scause 12)",
+               verify_fault_result("fetch/RW-NX", 12u,
+                                   (u64)(uintptr_t)&nx_probe_word,
+                                   (u64)(uintptr_t)&nx_probe_word));
+        mcheck("normal RX execution resumes after both expected faults", true);
 
         arch_puts("\n  mmu failures = ");
         arch_putdec((u64)mfail);

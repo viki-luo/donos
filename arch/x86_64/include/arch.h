@@ -123,6 +123,20 @@ u64 arch_mmu_set_writable(u32 page_2mib, bool writable);
  */
 void arch_mmu_set_wp(bool on);
 
+/* 精确恢复一个 2 MiB 页目录项并刷新地址翻译。 */
+void arch_mmu_set_entry(u32 page_2mib, u64 entry);
+
+/* 可恢复的预期 #PF，仅用于 MMU 自检。 */
+void arch_fault_expect(u64 error, u64 rip, u64 cr2, u64 resume);
+bool arch_fault_result(u64 *error, u64 *rip, u64 *cr2);
+
+/* 固定汇编探针；恢复地址是导出标签，不靠猜测指令长度。 */
+void arch_probe_write(void *target);
+void arch_probe_exec(void *target);
+extern char arch_probe_write_fault[];
+extern char arch_probe_write_resume[];
+extern char arch_probe_exec_resume[];
+
 /* 打印并修正保护状态；返回失败计数。 */
 int arch_mmu_verify(void);
 

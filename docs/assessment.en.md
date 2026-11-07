@@ -16,7 +16,7 @@ What the evidence supports:
 - Capacity exhaustion returns `WIRE_NONE` without damaging existing wires.
 - Dead handles and six forged-handle shapes are rejected.
 - With every available object slot filled and reference chains up to eight objects deep, one complete execution pass consumes about 1% to 2% of a 100 Hz tick period.
-- There is currently no user mode, W^X, enforced NX isolation, or sandbox for an upper brain. The prototype must not be described as production-secure.
+- There is no user mode, upper-brain sandbox, or authority model. x86_64 enforces the available large-page NX/WP subset and riscv64 enforces page-level W^X, but neither provides a user-mode brain sandbox. The prototype must not be described as production-secure.
 
 ## 2. Scope and method
 
@@ -142,7 +142,7 @@ The security verdict must therefore be phrased as:
 - Position remains consistent with actual execution count. For example, motion 3 over 99 steps produces position 297.
 - riscv64 programs its timer through SBI TIME, avoiding direct S-mode access to the PMP-protected CLINT. The timer interrupt only counts ticks; complex object execution remains in the main loop.
 - Temporary self-test and benchmark objects are released.
-- riscv64 Sv39 translation is active and verified through a real three-level walk; x86_64 NXE and CR0.WP are set.
+- Real MMU fault injection is verified on both architectures: x86_64 read-only writes produce #PF error 0x03 and NX fetches produce #PF 0x11 with matching RIP/CR2; riscv64 read-only stores produce scause 15 and RW/NX fetches scause 12. Both recover to ordinary RX execution after the expected faults.
 - The deterministic fuzz corpus (with falsifiable mutants measured) and the generation-exhaustion white-box test are both in the CI gate.
 
 ### An important observed behavior

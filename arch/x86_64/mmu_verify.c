@@ -7,9 +7,8 @@
  *   2. 拦截：越界的那一次访问必须触发 #PF，且错误码带对应的权限位。
  *   3. 可逆：探测过程中做的临时改动必须全部复原，且复原后重新可用。
  *
- * 第 2 条只能以「即将停机」的形式验证：本内核的异常处理在打印现场后
- * 进入 cli;hlt 循环，没有异常恢复框架。因此越界探测放在最后执行，
- * 并把判定权交给错误码本身 —— 打印出来的错误码就是证据。
+ * 两条真实故障都由异常入口恢复：只有 error、保存 RIP 与 CR2 全部匹配，
+ * 才跳过故障指令并回到汇编导出的恢复标签；其余异常仍打印现场并停机。
  */
 #include "arch.h"
 
@@ -51,23 +50,69 @@ int arch_mmu_verify(void)
                (page0 & 0x080ULL) != 0 && (page0 & (1ULL << 63)) == 0);
 
         /*
-         * 放行测试：把第 1 页临时标成只读，再改回可写。
-         * 这里写的是页目录项本身，不是设备内存，安全且可逆。
-         * WP 生效时，改页表本身不受影响（它是可写内存），
-         * 因此这个测试能一直活着走完。
+         * 放行与恢复：页目录项改动之后必须精确恢复，且真实故障之后还能
+         * 继续执行普通代码。下面两段都由可恢复的 #PF 分发器验证。
          */
-        u64 orig = arch_mmu_set_writable(20, false);
-        mcheck("a read-only entry can still be written by the mapper",
-               arch_mmu_entry(20) == (orig & ~0x002ULL));
-        arch_mmu_set_writable(20, true);
-        mcheck("restoring the writable bit puts the entry back",
-               arch_mmu_entry(20) == orig);
-
         /*
-         * 清理阶段：所有临时改动都已复原，内核仍能正常执行。
-         * 走到这里并且还能打印，本身就是「可执行区没被误伤」的证据。
+         * 真实故障 #1：对第 20 个 2 MiB 页写入。先确认可写，再临时
+         * 标只读，要求 #PF 的 error=0x03、CR2 和保存 RIP 全部匹配。
          */
-        mcheck("the kernel kept executing after the protection was installed",
+        volatile u8 *ro_target = (volatile u8 *)(uintptr_t)0x02801000ULL;
+        *ro_target = 0x11;
+        u64 orig_ro = arch_mmu_entry(20);
+        arch_mmu_set_entry(20, orig_ro & ~0x002ULL);
+        arch_fault_expect(0x03u,
+                          (u64)(uintptr_t)arch_probe_write_fault,
+                          (u64)(uintptr_t)ro_target,
+                          (u64)(uintptr_t)arch_probe_write_resume);
+        arch_probe_write((void *)(uintptr_t)ro_target);
+        arch_mmu_set_entry(20, orig_ro);
+
+        u64 error = 0;
+        u64 rip = 0;
+        u64 cr2 = 0;
+        bool ro_seen = arch_fault_result(&error, &rip, &cr2);
+        mcheck("hardware blocks a write to a read-only page (error 0x03)",
+               ro_seen && error == 0x03u &&
+               rip == (u64)(uintptr_t)arch_probe_write_fault &&
+               cr2 == (u64)(uintptr_t)ro_target);
+        mcheck("the rejected write leaves the byte unchanged",
+               *ro_target == 0x11u);
+        /*
+         * CPU 可能在页表遍历时设置访问位（A，bit 5），因此恢复后的
+         * 权限必须与故障前一致，而不能把 A 位的硬件更新误判为恢复错误。
+         * 页目录项自身的写入是精确恢复，随后读取又可能把 A 置回。
+         */
+        mcheck("the original PDE permissions are restored after the RO probe",
+               (arch_mmu_entry(20) & ~0x20ULL) == (orig_ro & ~0x20ULL));
+
+        /* NX 取指：先以可写页写入 ret 字节，再让 CPU 真的跳到那里取指。 */
+        const u64 nx_target = 0x02A00000ULL;
+        u64 orig_nx = arch_mmu_entry(21);
+        *(volatile u8 *)(uintptr_t)nx_target = 0xC3u;
+        mcheck("the NX scratch page is present and non-executable",
+               (orig_nx & 0x001ULL) != 0 &&
+               (orig_nx & 0x080ULL) != 0 &&
+               (orig_nx & (1ULL << 63)) != 0);
+        arch_fault_expect(0x11u, nx_target, nx_target,
+                          (u64)(uintptr_t)arch_probe_exec_resume);
+        arch_probe_exec((void *)(uintptr_t)nx_target);
+        bool nx_seen = arch_fault_result(&error, &rip, &cr2);
+        arch_mmu_set_entry(21, orig_nx);
+        arch_puts("  note: fetch/NX error=0x");
+        arch_puthex32((u32)error);
+        arch_puts(" rip=0x");
+        arch_puthex64(rip);
+        arch_puts(" cr2=0x");
+        arch_puthex64(cr2);
+        arch_puts("\n");
+        mcheck("instruction fetch from an NX page raises #PF 0x11",
+               nx_seen && error == 0x11u && rip == nx_target && cr2 == nx_target);
+        mcheck("the NX page directory entry stayed unchanged",
+               arch_mmu_entry(21) == orig_nx);
+
+        /* 两次恢复后再执行普通函数，证明没有停在异常处理循环里。 */
+        mcheck("normal execution resumes after both expected #PF probes",
                true);
 
         arch_puts("\n  mmu failures = ");

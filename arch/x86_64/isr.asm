@@ -96,9 +96,9 @@ ISR_NOERR 47
 ;   [rsp+40] rsp（仅特权级切换时）
 ;   [rsp+48] ss （仅特权级切换时）
 ;
-; 我们只保存调用者可能还在用的易失寄存器；被调用者保存寄存器
-; 由 C ABI 负责。因为编译时禁用了 SSE（-mgeneral-regs-only），
-; 这里不必保存 XMM，也不必保证 16 字节对齐。
+; 保存全部 C 调用者易失寄存器；r12 额外作为异常帧基址并一并保存。
+; C 侧可改写 saved-RIP 以恢复预期 #PF。禁 SSE 只省去 XMM，不免除
+; SysV 的调用栈对齐要求。CR2 在进入 C 之前采集，避免证据被覆盖。
 ; ---------------------------------------------------------------------
 isr_common:
         push    rax
@@ -110,13 +110,22 @@ isr_common:
         push    r9
         push    r10
         push    r11
+        push    r12                     ; 第 10 次压栈，同时用作帧基址
 
-        ; 9 次压栈 = 72 字节，因此原来的栈顶在 +72 处
-        mov     rdi, [rsp + 72]         ; 向量号
-        mov     rsi, [rsp + 80]         ; 错误码
-        mov     rdx, [rsp + 88]         ; 被打断的 rip
+        ; 10 次压栈 = 80 字节，原向量/错误码/RIP 在 +80/+88/+96。
+        ; r12 是 C ABI 的非易失寄存器，C 返回后仍指向同一异常帧。
+        mov     r12, rsp
+        mov     rdi, [r12 + 80]         ; 向量号
+        mov     rsi, [r12 + 88]         ; 错误码
+        lea     rdx, [r12 + 96]         ; 可写的 saved-RIP 地址
+        mov     rcx, cr2                ; 在 C 路径之前保存 CR2
+
+        ; SysV 要求 CALL 前栈按 16 字节对齐；禁 SSE 不豁免这条 ABI。
+        and     rsp, -16
         call    isr_dispatch
+        mov     rsp, r12
 
+        pop     r12
         pop     r11
         pop     r10
         pop     r9

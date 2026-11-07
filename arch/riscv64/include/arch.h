@@ -37,7 +37,10 @@ static inline u64 arch_time_ns(void)
 /* 每个节拍对应的 time 计数周期数：10 MHz / 100 Hz = 100000 */
 #define ARCH_TICK_CYCLES 100000ULL
 
-/* 建立陷阱向量，编程 CLINT 定时器，并在 sstatus 中打开 S 态中断。 */
+/* 只安装 S 态陷阱向量，不打开中断；MMU 故障注入在定时器之前需要它。 */
+void arch_trap_init(void);
+
+/* 建立陷阱向量，编程定时器，并在 sstatus 中打开 S 态中断。 */
 void arch_timer_init(u64 hartid);
 
 void arch_irq_enable(void);
@@ -104,6 +107,17 @@ void arch_mmu_walk3(u64 out[3]);
 #define PTE_R 0x002ULL
 #define PTE_W 0x004ULL
 #define PTE_X 0x008ULL
+
+/* 可恢复的预期故障：仅供 MMU 自检使用。 */
+void arch_fault_expect(u64 cause, u64 sepc, u64 stval, u64 resume);
+bool arch_fault_result(u64 *cause, u64 *sepc, u64 *stval);
+
+/* 固定汇编探针和符号，避免按指令长度猜测恢复地址。 */
+void arch_probe_store_ro(void *target);
+void arch_probe_exec_nx(void *target);
+extern char arch_probe_store_fault[];
+extern char arch_probe_store_resume[];
+extern char arch_probe_exec_resume[];
 
 /* 打印并核对当前保护状态；返回失败计数。 */
 int arch_mmu_verify(void);

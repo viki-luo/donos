@@ -31,6 +31,52 @@ static volatile u64 tick_count;
 
 extern void trap_entry(void);
 
+typedef struct {
+        volatile bool armed;
+        volatile bool seen;
+        u64 cause;
+        u64 sepc;
+        u64 stval;
+        u64 resume;
+        u64 observed_cause;
+        u64 observed_sepc;
+        u64 observed_stval;
+} expected_fault_t;
+
+static expected_fault_t expected_fault;
+
+void arch_trap_init(void)
+{
+        u64 vec = (u64)(uintptr_t)trap_entry;
+        __asm__ volatile("csrw stvec, %0" :: "r"(vec) : "memory");
+}
+
+void arch_fault_expect(u64 cause, u64 sepc, u64 stval, u64 resume)
+{
+        expected_fault.seen = false;
+        expected_fault.cause = cause;
+        expected_fault.sepc = sepc;
+        expected_fault.stval = stval;
+        expected_fault.resume = resume;
+        expected_fault.observed_cause = 0;
+        expected_fault.observed_sepc = 0;
+        expected_fault.observed_stval = 0;
+        __asm__ volatile("" ::: "memory");
+        expected_fault.armed = true;
+}
+
+bool arch_fault_result(u64 *cause, u64 *sepc, u64 *stval)
+{
+        __asm__ volatile("" ::: "memory");
+        if (cause != 0)
+                *cause = expected_fault.observed_cause;
+        if (sepc != 0)
+                *sepc = expected_fault.observed_sepc;
+        if (stval != 0)
+                *stval = expected_fault.observed_stval;
+        return expected_fault.seen && !expected_fault.armed;
+}
+
 static void halt(void)
 {
         for (;;)
@@ -82,9 +128,8 @@ void arch_timer_init(u64 hart)
 {
         (void)hart;                     /* 单 hart 运行，SBI 调用隐式使用它 */
 
-        /* 陷阱向量必须先装好，再打开中断 */
-        u64 vec = (u64)(unsigned long)trap_entry;
-        __asm__ volatile("csrw stvec, %0" :: "r"(vec));
+        /* 陷阱向量必须先装好，再打开中断。 */
+        arch_trap_init();
 
         next_cmp = arch_time() + ARCH_TICK_CYCLES;
         timer_set(next_cmp);
@@ -112,7 +157,7 @@ u64 arch_ticks(void)
 /*
  * 由 traps.S 调用。scause 最高位为 1 表示中断，否则为异常。
  */
-void trap_dispatch(u64 scause, u64 sepc, u64 stval)
+u64 trap_dispatch(u64 scause, u64 sepc, u64 stval)
 {
         if (scause & SCAUSE_INT) {
                 u64 code = scause & SCAUSE_CODE;
@@ -121,13 +166,32 @@ void trap_dispatch(u64 scause, u64 sepc, u64 stval)
                         tick_count++;
                         next_cmp += ARCH_TICK_CYCLES;
                         timer_set(next_cmp);
-                        return;
+                        return sepc;
                 }
 
                 arch_puts("\n!! unexpected interrupt, code = ");
                 arch_putdec(code);
                 arch_puts("\n");
                 halt();
+        }
+
+        if (expected_fault.armed) {
+                expected_fault.observed_cause = scause;
+                expected_fault.observed_sepc = sepc;
+                expected_fault.observed_stval = stval;
+
+                if (scause == expected_fault.cause &&
+                    sepc == expected_fault.sepc &&
+                    stval == expected_fault.stval) {
+                        u64 resume = expected_fault.resume;
+                        expected_fault.armed = false;
+                        expected_fault.seen = true;
+                        __asm__ volatile("" ::: "memory");
+                        return resume;
+                }
+
+                arch_puts("\n!! expected MMU fault mismatch");
+                expected_fault.armed = false;
         }
 
         arch_puts("\n!! CPU exception\n  scause = 0x");
@@ -139,4 +203,5 @@ void trap_dispatch(u64 scause, u64 sepc, u64 stval)
         arch_puts("\n");
 
         halt();
+        return sepc;
 }

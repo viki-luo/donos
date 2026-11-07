@@ -149,8 +149,68 @@ void arch_irq_disable(void)
 /* 「恢复」可言，把现场留下比继续跑更有价值。                          */
 /* ------------------------------------------------------------------ */
 
-void isr_dispatch(u64 vector, u64 error, u64 rip)
+typedef struct {
+        volatile bool armed;
+        volatile bool seen;
+        u64 error;
+        u64 rip;
+        u64 cr2;
+        u64 resume;
+        u64 observed_error;
+        u64 observed_rip;
+        u64 observed_cr2;
+        u32 hits;
+} expected_fault_t;
+
+static expected_fault_t expected_fault;
+
+void arch_fault_expect(u64 error, u64 rip, u64 cr2, u64 resume)
 {
+        expected_fault.armed = false;
+        expected_fault.seen = false;
+        expected_fault.error = error;
+        expected_fault.rip = rip;
+        expected_fault.cr2 = cr2;
+        expected_fault.resume = resume;
+        expected_fault.hits = 0;
+        expected_fault.observed_error = 0;
+        expected_fault.observed_rip = 0;
+        expected_fault.observed_cr2 = 0;
+        __asm__ volatile("" ::: "memory");
+        expected_fault.armed = true;
+}
+
+bool arch_fault_result(u64 *error, u64 *rip, u64 *cr2)
+{
+        if (error != 0)
+                *error = expected_fault.observed_error;
+        if (rip != 0)
+                *rip = expected_fault.observed_rip;
+        if (cr2 != 0)
+                *cr2 = expected_fault.observed_cr2;
+        return expected_fault.seen && !expected_fault.armed;
+}
+
+void isr_dispatch(u64 vector, u64 error, u64 *saved_rip, u64 cr2)
+{
+        if (vector == 14 && expected_fault.armed) {
+                expected_fault.observed_error = error;
+                expected_fault.observed_rip = *saved_rip;
+                expected_fault.observed_cr2 = cr2;
+
+                if (error == expected_fault.error &&
+                    *saved_rip == expected_fault.rip &&
+                    cr2 == expected_fault.cr2) {
+                        expected_fault.armed = false;
+                        expected_fault.seen = true;
+                        *saved_rip = expected_fault.resume;
+                        return;
+                }
+
+                expected_fault.armed = false;
+                arch_puts("\n!! expected #PF mismatch\n");
+        }
+
         if (vector < 32) {
                 arch_puts("\n!! CPU exception\n");
                 arch_puts("   vector = ");
@@ -158,7 +218,11 @@ void isr_dispatch(u64 vector, u64 error, u64 rip)
                 arch_puts("\n   error  = 0x");
                 arch_puthex32((u32)error);
                 arch_puts("\n   rip    = 0x");
-                arch_puthex64(rip);
+                arch_puthex64(*saved_rip);
+                if (vector == 14) {
+                        arch_puts("\n   cr2    = 0x");
+                        arch_puthex64(cr2);
+                }
                 arch_puts("\n");
 
                 for (;;)
@@ -171,7 +235,6 @@ void isr_dispatch(u64 vector, u64 error, u64 rip)
                 if (irq == 0)
                         tick_count++;
 
-                /* 从片的中断要先给从片 EOI，再给主片 */
                 if (irq >= 8)
                         arch_outb(PIC2_CMD, PIC_EOI);
                 arch_outb(PIC1_CMD, PIC_EOI);

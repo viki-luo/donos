@@ -160,6 +160,13 @@ u64 arch_mmu_entry(u32 page_2mib)
         return pd[page_2mib];
 }
 
+/* 精确恢复页目录项：RW/NX 等位不能被一次只读改动意外丢失。 */
+void arch_mmu_set_entry(u32 page_2mib, u64 entry)
+{
+        pd[page_2mib] = entry;
+        reload_cr3();
+}
+
 /* 直接把 CR0.WP 置位或清零，用于证明「位 + 权限」缺一不可 */
 void arch_mmu_set_wp(bool on)
 {

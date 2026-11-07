@@ -55,6 +55,9 @@ void kernel_main(u64 hartid, u64 dtb)
         /* 总线发现：与 x86_64 共用 drivers/pci.c，配置空间走 ECAM */
         pci_discover();
 
+        /* MMU 故障注入发生在定时器启动前，先安装陷阱向量但不打开中断。 */
+        arch_trap_init();
+
         /* 保护状态自报：satp 是不是 0，决定「有没有保护」这件事 */
         arch_puts("\n--- protection: what the MMU actually enforces ---\n");
         arch_report_protection();
