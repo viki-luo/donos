@@ -274,11 +274,21 @@ $(WIRE_TEST): tests/host/test_wire.c base/base.c base/include/base.h \
 	@mkdir -p build/host
 	$(HOST_CC) $(HOST_CFLAGS) tests/host/test_wire.c -o $@
 
-$(MONITOR_TEST): tests/host/test_monitor.c monitor/monitor.c \
+$(MONITOR_TEST): tests/host/test_monitor.c monitor/monitor.c base/quat.c \
                  monitor/include/monitor.h base/base.c base/object.c base/fixed.c \
-                 base/include/base.h base/include/object.h base/include/fixed.h
+                 base/include/base.h base/include/object.h base/include/fixed.h \
+                 base/include/quat.h
 	@mkdir -p build/host
-	$(HOST_CC) $(HOST_CFLAGS) -Imonitor/include tests/host/test_monitor.c -o $@
+	$(HOST_CC) $(HOST_CFLAGS) -Imonitor/include tests/host/test_monitor.c base/quat.c -o $@
+
+# 姿态积分与行程限位的宿主边界：期望值全部手算，不回读实现。
+QUAT_TEST := build/host/test_quat.exe
+
+$(QUAT_TEST): tests/host/test_quat.c base/base.c base/fixed.c base/quat.c \
+              base/object.c base/include/base.h base/include/types.h \
+              base/include/fixed.h base/include/quat.h base/include/object.h
+	@mkdir -p build/host
+	$(HOST_CC) $(HOST_CFLAGS) tests/host/test_quat.c -o $@
 
 # 确定性模糊：固定种子 → 可复现。语料覆盖 8 类操作（含专门核对 dof
 # 尾部的 apply_tail），不变量由影子表独立对账。
@@ -288,10 +298,10 @@ $(MONITOR_TEST): tests/host/test_monitor.c monitor/monitor.c \
 FUZZ_TEST   := build/host/fuzz_base.exe
 FUZZ_ITERS  ?= 200000
 
-$(FUZZ_TEST): tests/host/fuzz_base.c base/base.c base/object.c base/fixed.c \
-              base/include/base.h base/include/object.h base/include/fixed.h
+$(FUZZ_TEST): tests/host/fuzz_base.c base/quat.c base/base.c base/object.c base/fixed.c \
+              base/include/base.h base/include/object.h base/include/fixed.h base/include/quat.h
 	@mkdir -p build/host
-	$(HOST_CC) $(HOST_CFLAGS) tests/host/fuzz_base.c -o $@
+	$(HOST_CC) $(HOST_CFLAGS) tests/host/fuzz_base.c base/quat.c -o $@
 
 fuzz: $(FUZZ_TEST)
 	@$(FUZZ_TEST) $(FUZZ_ITERS) | tee build/host/fuzz.log
@@ -302,10 +312,11 @@ fuzz: $(FUZZ_TEST)
 		echo "  确定性模糊出现失败"; exit 1; \
 	fi
 
-host-test: $(HOST_TEST) $(WIRE_TEST) $(MONITOR_TEST)
+host-test: $(HOST_TEST) $(WIRE_TEST) $(MONITOR_TEST) $(QUAT_TEST)
 	@$(HOST_TEST)
 	@$(WIRE_TEST)
 	@$(MONITOR_TEST)
+	@$(QUAT_TEST)
 
 # MinGW 的 UBSan 运行库并非所有发行包都完整，因此使用 trap-on-error：
 # 编译器在任何 UB 点直接发出陷阱指令，不需要链接 sanitizer runtime。
@@ -323,12 +334,17 @@ sanitize:
 	@build/host/test_wire_ubsan.exe
 	$(HOST_CC) $(HOST_CFLAGS) -Imonitor/include -fsanitize=undefined \
 		-fsanitize-undefined-trap-on-error \
-		tests/host/test_monitor.c \
+		tests/host/test_monitor.c base/quat.c \
 		-o build/host/test_monitor_ubsan.exe
 	@build/host/test_monitor_ubsan.exe
 	$(HOST_CC) $(HOST_CFLAGS) -fsanitize=undefined \
 		-fsanitize-undefined-trap-on-error \
-		tests/host/fuzz_base.c \
+		tests/host/test_quat.c \
+		-o build/host/test_quat_ubsan.exe
+	@build/host/test_quat_ubsan.exe
+	$(HOST_CC) $(HOST_CFLAGS) -fsanitize=undefined \
+		-fsanitize-undefined-trap-on-error \
+		tests/host/fuzz_base.c base/quat.c \
 		-o build/host/fuzz_base_ubsan.exe
 	@build/host/fuzz_base_ubsan.exe 50000
 

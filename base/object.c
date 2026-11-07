@@ -13,7 +13,7 @@
 #include "base.h"
 #include "fixed.h"
 #include "object.h"
-
+#include "quat.h"
 typedef struct {
         bool           in_use;
         wire_t         wire;
@@ -34,6 +34,7 @@ typedef struct {
         u32            unit;          /* 物件自述的单位语义（R3） */
         u64            period_ns;     /* 物件自述的控制周期，由执行层兑现 */
         motion_fixed_t carry[3];      /* 积分余数：不足一个最低位的零头 */
+        motion_fixed_t orientation_carry[4]; /* 四元数各分量的积分余数 */
         u64            next_due_ns;   /* 下一次运动环到期时刻；0 = 尚未起步 */
         u32            step_count;
 
@@ -86,6 +87,8 @@ void object_init(void)
                 objects[i].carry[0] = 0;
                 objects[i].carry[1] = 0;
                 objects[i].carry[2] = 0;
+                for (u8 k = 0; k < 4; k++)
+                        objects[i].orientation_carry[k] = 0;
                 objects[i].next_due_ns = 0;
                 objects[i].step_count = 0;
                 for (u8 k = 0; k < MOTION_DOF_MAX; k++)
@@ -148,6 +151,8 @@ wire_t object_plug(u32 unit, u64 period_ns)
                 objects[i].carry[0] = 0;
                 objects[i].carry[1] = 0;
                 objects[i].carry[2] = 0;
+                for (u8 k = 0; k < 4; k++)
+                        objects[i].orientation_carry[k] = 0;
                 objects[i].next_due_ns = 0;
                 objects[i].step_count = 0;
                 for (u8 k = 0; k < MOTION_DOF_MAX; k++)
@@ -455,6 +460,8 @@ bool object_set_state(wire_t w, const object_state_t *st)
          */
         for (u8 i = 0; i < 3; i++)
                 o->carry[i] = 0;
+        for (u8 i = 0; i < 4; i++)
+                o->orientation_carry[i] = 0;
 
         return true;
 }
@@ -688,7 +695,7 @@ object_resolve_status_t object_resolve(wire_t w,
 }
 
 /* ------------------------------------------------------------------ */
-/* 执行模型（设计决定 16）：按物件自述的 period_ns 推进运动环           */
+/* 姿态积分与行程边界（物件侧）                                         */
 /*                                                                    */
 /* 这一层在基座之外。基座不调度、不计时；时间由调用者（架构层）给出。 */
 /* ------------------------------------------------------------------ */
@@ -712,10 +719,71 @@ object_resolve_status_t object_resolve(wire_t w,
  * 余数进位把丢掉的零头存下来在下一次补上，误差只在 ±1 个最低位之间
  * 摆动而不累积，因此两条不同周期的积分路径给出逐比特相同的结果。
  *
- * 只积分线分量（0..2）到位姿；角分量（3..5）可被解算与直读，
- * 参考实现不积分姿态（那是物件自己的闭环的事）。
+ * 只积分线分量（0..2）到相对位置；角分量（3..5）在 dof=6 的命令下
+ * 按 q̇ = ½ ω ⊗ q 积分进姿态并逐步归一化。ω 按参照系坐标表达，
+ * 与 object_resolve 沿链旋转命令角速度的约定一致（q 把本体坐标转到
+ * 参照系坐标，故用左乘）。姿态未申报（全零）而角速度非零时，从单位
+ * 姿态开始旋转。
+ *
+ * 整步原子性：位置、姿态、余数先全部算进临时值，任一轴积分失败、
+ * 姿态归一化失败或行程限位拒绝，整步一起拒绝——物件停在原位原姿态，
+ * 不留下「位置动了、姿态没动」的半步。
+ *
+ * 行程限位：申报了 [limit_min, limit_max]（两者不同时为 0）的轴，
+ * 积分结果落在区间外即拒绝该步。物件停在最后一次界内位置；
+ * 该步仍计入执行（调度前进），与参照链断开时的处理一致。
  * 参照链断开或成环时位置保持不动，但这一步仍算执行过。
  */
+static bool integrate_orientation(object_t *o)
+{
+        motion_fixed_t q[4];
+        motion_fixed_t omega[3];
+        motion_fixed_t product[4];
+        motion_fixed_t next_carry[4];
+        bool rotating = false;
+
+        if (o->dof < 6)
+                return true;
+        for (u8 i = 0; i < 3; i++) {
+                omega[i] = o->cmd_motion[3 + i];
+                if (omega[i] != 0)
+                        rotating = true;
+        }
+        for (u8 i = 0; i < 4; i++) {
+                q[i] = o->state.orientation[i];
+                next_carry[i] = o->orientation_carry[i];
+        }
+        if (!rotating)
+                return true;
+        /* 从未申报姿态的物件从单位姿态开始旋转。 */
+        if (q[0] == 0 && q[1] == 0 && q[2] == 0 && q[3] == 0)
+                q[0] = Q_ONE;
+
+        /*
+         * 命令角速度按参照系坐标表达（object_resolve 沿链旋转的正是它），
+         * q 把本体坐标转到参照系坐标，因此 q̇ = ½ ω ⊗ q，用左乘。
+         */
+        if (!quat_angular_product(q, omega, product))
+                return false;
+
+        for (u8 i = 0; i < 4; i++) {
+                motion_fixed_t derivative, delta;
+                if (fixed_mul_checked(product[i], Q_ONE / 2, &derivative) != FIXED_OK ||
+                    fixed_velocity_step_checked(derivative, o->period_ns,
+                                                o->orientation_carry[i], &delta,
+                                                &next_carry[i]) != FIXED_OK ||
+                    fixed_add_checked(q[i], delta, &q[i]) != FIXED_OK)
+                        return false;
+        }
+        if (!quat_normalize(q))
+                return false;
+        for (u8 i = 0; i < 4; i++) {
+                o->state.orientation[i] = q[i];
+                o->orientation_carry[i] = next_carry[i];
+        }
+        return true;
+}
+
 static void object_step(object_t *o)
 {
         motion_fixed_t r[MOTION_DOF_MAX];
@@ -754,8 +822,18 @@ static void object_step(object_t *o)
                                 valid = false;
                                 break;
                         }
+                        /* Non-zero declared intervals are enforced at the
+                         * integration boundary. [0,0] retains the legacy
+                         * "no declared limit" meaning for compatibility. */
+                        if (o->described && i < o->cap.dof &&
+                            (o->cap.limit_min[i] != 0 || o->cap.limit_max[i] != 0) &&
+                            (next_position[i] < o->cap.limit_min[i] ||
+                             next_position[i] > o->cap.limit_max[i]))
+                                valid = false;
                 }
 
+                if (valid && !integrate_orientation(o))
+                        valid = false;
                 if (valid) {
                         for (u8 i = 0; i < count; i++) {
                                 o->state.position[i] = next_position[i];

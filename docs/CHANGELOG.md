@@ -282,6 +282,9 @@
 
 ### Added / 新增
 
+- **角速度积分到姿态与行程限位策略**（设计决定 31）：dof=6 命令的角分量按 `q̇ = ½ ω ⊗ q` 积分进姿态并逐步归一化（ω 按参照系坐标表达，与 `object_resolve` 沿链旋转命令角速度的约定一致；归一化用保符号的整数平方根）。申报了 `[limit_min, limit_max]`（两者不同时为 0）的轴在积分处生效：越界拒绝整步，物件停在最后一次界内位置，被拒的步仍计入执行。任一轴积分溢出或归一化失败同样整步拒绝。新增宿主门禁 `tests/host/test_quat.c`（期望值全部手算，含经 `object_run` 的端到端旋转与限位拒绝），接入 `make host-test` 与 `make sanitize`
+  / **angular rate integrated into attitude with a travel-limit policy** (decision 31): the angular components of a dof=6 command integrate into the attitude as `q̇ = ½ ω ⊗ q` with per-step renormalisation (ω expressed in frame coordinates, matching how `object_resolve` rotates commanded angular velocity along the chain; normalisation uses a sign-preserving integer square root). A declared `[limit_min, limit_max]` (not both zero) binds during integration: a crossing refuses the whole step, the object holds at its last in-range position, and refused steps still count as executed. Integration overflow or failed normalisation refuses the step as well. New host gate `tests/host/test_quat.c` (all expectations hand-computed, including end-to-end rotation and limit refusal through `object_run`), wired into `make host-test` and `make sanitize`
+
 - **两架构真实 MMU 违规访问故障注入**：x86_64 的只读写入触发 error=0x03、NX 页取指得到 0x11，CR2 与保存 RIP 精确匹配后恢复；riscv64 的 R-only 写入得到 scause=15，RW/NX 页取指得到 scause=12，按精确 sepc/stval 恢复。页表位断言不再被冒充为硬件拦截证据
   / **real MMU fault injection on both architectures**: x86_64 verifies #PF 0x03 for read-only writes and 0x11 for NX instruction fetches with exact CR2/RIP matching; riscv64 verifies store fault 15 and instruction page fault 12 with exact stval/SEPC. Both recover to normal execution
 
