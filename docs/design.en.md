@@ -425,7 +425,7 @@ Four concrete meanings:
 - [x] A second processor architecture: riscv64 (QEMU virt + OpenSBI, `make ARCH=riscv64`), with `base/` unchanged and all verification passing
 - [x] riscv64 bus discovery: shares `drivers/pci.c` with x86_64; configuration space is accessed through ECAM (0x30000000)
 - [x] riscv64 timer interrupts: CLINT is programmed through the SBI TIME extension (EID 0x54494D45) and S-mode counts ticks in the `stvec` trap handler; the main loop waits in `wfi`, matching the semantics of x86_64's PIT
-- [ ] riscv64 runtime hot-plug (the virt root bus does not support eject)
-- [ ] Landing the upper brain and brain hot-swap
+- [ ] riscv64 runtime hot-plug: an **environment limitation** — QEMU virt's root bus does not support device eject; this is not missing code
+- [x] Landing the upper brain and brain hot-swap: `brain/` provides a reference brain (an ordinary wire plus a decision period plus a read-only "target + now"), with 14 assertions per architecture and a live two-second hot swap that hands nothing over (decision 28). **Honest limit**: this is a reference implementation, not a general brain framework; the swap is cooperative and the base has no authority model
 - [x] Enforce `limit_min` / `limit_max` during integration: settled as decision 31 — a crossing refuses the whole step and the object holds at its last in-range position; attitude integration (`q̇ = ½ ω ⊗ q` under the frame-coordinate convention) lands with the same decision
 - [ ] Naming
