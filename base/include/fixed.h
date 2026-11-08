@@ -5,8 +5,8 @@
  * Every operation reports overflow instead of relying on signed wraparound.
  * The base itself does not use this layer: world arithmetic belongs to objects.
  */
-#ifndef LITEOS_FIXED_H
-#define LITEOS_FIXED_H
+#ifndef DONOS_FIXED_H
+#define DONOS_FIXED_H
 
 #include "base.h"
 
@@ -42,4 +42,4 @@ fixed_status_t fixed_velocity_step_checked(motion_fixed_t velocity,
                                            motion_fixed_t *delta,
                                            motion_fixed_t *new_carry);
 
-#endif /* LITEOS_FIXED_H */
+#endif /* DONOS_FIXED_H */

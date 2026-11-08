@@ -50,7 +50,7 @@ jobs:
           case "${{ matrix.arch }}" in
             x86_64)
               timeout 30 qemu-system-x86_64 \
-                -kernel build/x86_64/liteos.bin \
+                -kernel build/x86_64/donos.bin \
                 -m 256M \
                 -serial file:serial.log \
                 -display none -no-reboot -no-shutdown || rc=$?
@@ -58,7 +58,7 @@ jobs:
             riscv64)
               timeout 30 qemu-system-riscv64 \
                 -machine virt -bios default -m 256M \
-                -kernel build/riscv64/liteos.bin \
+                -kernel build/riscv64/donos.bin \
                 -device e1000 \
                 -serial file:serial.log \
                 -display none -no-reboot || rc=$?

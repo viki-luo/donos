@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * base.h — liteOS 基座接口（硬件无关）
+ * base.h — DONos 基座接口（硬件无关）
  *
  * 基座是一个无状态的运动控制函数：
  *
@@ -15,8 +15,8 @@
  * 任何在本文件之外出现的「停止」「查询状态」「记录历史」接口，
  * 都是设计违规。
  */
-#ifndef LITEOS_BASE_H
-#define LITEOS_BASE_H
+#ifndef DONOS_BASE_H
+#define DONOS_BASE_H
 
 #include "types.h"
 
@@ -167,4 +167,4 @@ void base_depart(wire_t w);
 /* 接线当前是否有效（仅查询接线本身，不涉及世界状态）。 */
 bool base_wire_valid(wire_t w);
 
-#endif /* LITEOS_BASE_H */
+#endif /* DONOS_BASE_H */

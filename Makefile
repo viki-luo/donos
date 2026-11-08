@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-# liteOS — 构建系统
+# DONos — 构建系统
 #
 # 工具链：clang + lld（能输出裸机 ELF），nasm，qemu
 # 用法：
@@ -13,7 +13,7 @@ ARCH      ?= x86_64
 # 两者输出到不同目录，互不覆盖，因此 make check 与发布构建可以先后共存。
 SELFTEST  ?= 0
 BUILD     ?= build/$(ARCH)$(if $(filter 1,$(SELFTEST)),/selftest,)
-OUT       := liteos.bin
+OUT       := donos.bin
 
 # ---------------------------------------------------------------------
 # 目标三元组：裸机，无宿主 ABI
@@ -113,7 +113,7 @@ S_SRCS   := $(filter-out arch/$(ARCH)/mmu_probe.S, \
 
 # 故障注入探针只在自检构建里链接：它们的存在本身就是为了故意违约。
 ifeq ($(SELFTEST),1)
-CFLAGS   += -DLITEOS_SELFTEST=1
+CFLAGS   += -DDONOS_SELFTEST=1
 C_SRCS   += $(SELFTEST_ONLY_C)
 ifneq ($(filter %.asm,$(SELFTEST_ONLY_PROBE)),)
 ASM_SRCS += $(SELFTEST_ONLY_PROBE)
@@ -233,7 +233,7 @@ check:
 		grep -qE '^  brain failures = 0$$' $$log || { echo "$$arch 大脑热切换自检失败"; grep -E 'brain failures' $$log; exit 1; }; \
 		grep -qE '^  mmu failures = 0$$' $$log || { echo "$$arch MMU 自检失败"; grep -E 'mmu failures' $$log; exit 1; }; \
 		grep -q 'protection: what the MMU actually enforces' $$log || { echo "$$arch 未自报保护状态"; exit 1; }; \
-		if logs=$$($(NM) build/$$arch/selftest/liteos.bin 2>/dev/null | grep ' U ' | awk '{print $$2}'); \
+		if logs=$$($(NM) build/$$arch/selftest/donos.bin 2>/dev/null | grep ' U ' | awk '{print $$2}'); \
 		   [ -n "$$logs" ]; then \
 			echo "$$arch 仍有未定义的运行时符号（裸机没有库可链接）:"; \
 			echo "$$logs"; exit 1; \
@@ -257,7 +257,7 @@ clean:
 check-symbols:
 	@set -e; \
 	for arch in x86_64 riscv64; do \
-		bin=build/$$arch/liteos.bin; \
+		bin=build/$$arch/donos.bin; \
 		test -s $$bin || { echo "缺少镜像 $$bin"; exit 1; }; \
 		out=$$($(NM) $$bin 2>/dev/null | grep ' U ' || true); \
 		if [ -n "$$out" ]; then \
@@ -408,7 +408,7 @@ check-slim:
 	$(MAKE) ARCH=x86_64 SELFTEST=0 >/dev/null; \
 	$(MAKE) ARCH=riscv64 SELFTEST=0 >/dev/null; \
 	for arch in x86_64 riscv64; do \
-		bin=build/$$arch/liteos.bin; \
+		bin=build/$$arch/donos.bin; \
 		test -s $$bin || { echo "缺少发布镜像 $$bin"; exit 1; }; \
 		if hits=$$($(NM) $$bin 2>/dev/null | grep -E ' (base_verify|bench_run|monitor_verify|brain_verify|arch_mmu_verify)$$'); then \
 			echo "$$arch 发布镜像残留自检符号（证据不应随固件出货）:"; \
@@ -422,12 +422,12 @@ check-slim:
 		rm -f $$log; \
 		if [ "$$arch" = x86_64 ]; then \
 			timeout 40 qemu-system-x86_64 -icount shift=0,align=off,sleep=off \
-				-kernel build/x86_64/liteos.bin -m 256M \
+				-kernel build/x86_64/donos.bin -m 256M \
 				-serial file:$$log -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true; \
 		else \
 			timeout 70 qemu-system-riscv64 -icount shift=0,align=off,sleep=off \
 				-machine virt -bios default -m 256M \
-				-kernel build/riscv64/liteos.bin -device e1000 \
+				-kernel build/riscv64/donos.bin -device e1000 \
 				-serial file:$$log -display none -no-reboot >/dev/null 2>&1 || true; \
 		fi; \
 		tr -d '\r' < $$log | grep -q 'objects keep moving' || { \

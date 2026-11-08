@@ -43,7 +43,7 @@ static void put_fixed(motion_fixed_t v)
 
 void kernel_main(u64 hartid, u64 dtb)
 {
-        arch_puts("=== liteOS (riscv64) ===\n");
+        arch_puts("=== DONos (riscv64) ===\n");
         arch_puts("[boot] hart = ");
         arch_putdec(hartid);
         arch_puts("\n[boot] dtb  = 0x");
@@ -68,10 +68,10 @@ void kernel_main(u64 hartid, u64 dtb)
          * 装不上就停在 Bare 上继续跑，并把原因报出来 —— 静默降级不可接受。
          *
          * 建表**无条件执行**（这是产品的一部分）；故障注入式验证只在
-         * LITEOS_SELFTEST=1 时编入。
+         * DONOS_SELFTEST=1 时编入。
          */
         if (arch_mmu_init() == 0) {
-#if LITEOS_SELFTEST
+#if DONOS_SELFTEST
                 if (arch_mmu_verify() != 0)
                         arch_puts("\n!! page permissions are not W^X\n");
 #endif
@@ -79,7 +79,7 @@ void kernel_main(u64 hartid, u64 dtb)
                 arch_puts("\n!! arch_mmu_init failed; staying in Bare mode\n");
         }
 
-#if LITEOS_SELFTEST
+#if DONOS_SELFTEST
         base_verify();
 #endif
 
@@ -90,7 +90,7 @@ void kernel_main(u64 hartid, u64 dtb)
         arch_timer_init(hartid);
         arch_irq_enable();
 
-#if LITEOS_SELFTEST
+#if DONOS_SELFTEST
         /* 测量：原语代价、参照链代价、最坏节拍占用、压力行为 */
         bench_run();
 

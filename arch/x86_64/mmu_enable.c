@@ -6,7 +6,7 @@
  * 因此必须无条件编入发布镜像 —— 保护不是测试，测试才是。
  *
  * 探测（真实违规访问、与期望错误码比对）住在 mmu_verify.c，只在
- * LITEOS_SELFTEST=1 时编入。
+ * DONOS_SELFTEST=1 时编入。
  */
 #include "arch.h"
 

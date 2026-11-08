@@ -2,7 +2,7 @@
 
 English | [简体中文](conformance.md)
 
-This document defines what a motion object must satisfy to attach to the liteOS base.
+This document defines what a motion object must satisfy to attach to the DONos base.
 For the design rationale see [design.en.md](design.en.md), especially the bidirectional interface contract in §3.6–3.8.
 
 ---

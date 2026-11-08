@@ -8,8 +8,8 @@
  * 这条分工很重要：基座必须保持硬件无关，才能被搬到别的处理器架构上；
  * 一切和具体机器绑定的东西都收在本层。
  */
-#ifndef LITEOS_ARCH_H
-#define LITEOS_ARCH_H
+#ifndef DONOS_ARCH_H
+#define DONOS_ARCH_H
 
 #include "types.h"
 
@@ -110,7 +110,7 @@ void arch_report_protection(void);
 bool arch_mmu_enable(void);
 
 /*
- * 下面这些是**探测辅助**，只在 LITEOS_SELFTEST=1 的构建里存在。
+ * 下面这些是**探测辅助**，只在 DONOS_SELFTEST=1 的构建里存在。
  * 发布镜像不链接它们 —— 发布镜像只需要上面的 arch_mmu_enable()。
  */
 bool arch_mmu_enable_nx(void);
@@ -159,4 +159,4 @@ extern char arch_probe_exec_resume[];
 /* 打印并修正保护状态；返回失败计数。 */
 int arch_mmu_verify(void);
 
-#endif /* LITEOS_ARCH_H */
+#endif /* DONOS_ARCH_H */

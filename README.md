@@ -1,4 +1,4 @@
-# liteOS
+# DONos
 
 > 一切皆运动。基座只管运动控制 —— 无状态，可被任意大脑骑乘。
 >
@@ -14,9 +14,9 @@
 
 ## 这是什么 / What is this
 
-liteOS 不是"一个操作系统"，而是一个**基座**：一个只管运动控制、无状态、可被任意上层大脑骑乘的底座。
+DONos 不是"一个操作系统"，而是一个**基座**：一个只管运动控制、无状态、可被任意上层大脑骑乘的底座。
 
-*liteOS is not "an operating system" but a **base**: a stateless foundation that does exactly one thing — motion control — and can be ridden by any replaceable brain.*
+*DONos is not "an operating system" but a **base**: a stateless foundation that does exactly one thing — motion control — and can be ridden by any replaceable brain.*
 
 | 层 / Layer | 角色 / Role | 特征 / Property |
 |---|---|---|
@@ -82,7 +82,7 @@ make run
 The serial console prints platform init, bus discovery and the self-test (excerpt):
 
 ```
-=== liteOS ===
+=== DONos ===
 --- platform ---
   idt   installed (48 vectors)
   irq   enabled, timer ticking

@@ -13,8 +13,8 @@
  * 新大脑读的是物件自持的现场（object_state / object_resolve），
  * 而不是旧大脑留下的变量。物件即记忆，记忆不在大脑手上。
  */
-#ifndef LITEOS_BRAIN_H
-#define LITEOS_BRAIN_H
+#ifndef DONOS_BRAIN_H
+#define DONOS_BRAIN_H
 
 #include "base.h"
 

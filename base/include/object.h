@@ -11,8 +11,8 @@
  * 本头文件供自检与调试使用。真实物件通常由驱动实现同一组语义，
  * 不一定要链接这份参考实现。
  */
-#ifndef LITEOS_OBJECT_H
-#define LITEOS_OBJECT_H
+#ifndef DONOS_OBJECT_H
+#define DONOS_OBJECT_H
 
 #include "base.h"
 
@@ -252,4 +252,4 @@ u32 object_event_count(wire_t w);
  */
 motion_fixed_t object_motion(wire_t w, u8 i);
 
-#endif /* LITEOS_OBJECT_H */
+#endif /* DONOS_OBJECT_H */

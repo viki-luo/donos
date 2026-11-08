@@ -43,8 +43,8 @@ jobs:
         run: |
           set -eux
           make ARCH=${{ matrix.arch }}
-          test -s build/${{ matrix.arch }}/liteos.bin
-          llvm-size build/${{ matrix.arch }}/liteos.bin
+          test -s build/${{ matrix.arch }}/donos.bin
+          llvm-size build/${{ matrix.arch }}/donos.bin
 
       # 防回归门禁：裸机镜像里不允许出现「需要外部链接」的编译器运行时符号。
       # 注意不是常见的「变量除数」问题 —— 在 rv64imac（含 M 扩展）与
@@ -61,7 +61,7 @@ jobs:
       - name: 检查未定义运行时符号 / Check for undefined runtime symbols
         run: |
           set -eux
-          image=build/${{ matrix.arch }}/liteos.bin
+          image=build/${{ matrix.arch }}/donos.bin
           if llvm-nm --undefined-only "$image" | grep -v '^-'; then
             echo "::error file=$image::undefined compiler-runtime symbol in a bare-metal image"
             exit 1

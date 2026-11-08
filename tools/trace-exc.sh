@@ -6,7 +6,7 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
 if [ -d /ucrt64/bin ]; then export PATH=/usr/bin:/bin:/ucrt64/bin:$PATH; fi
 
-BIN=build/x86_64/liteos.bin
+BIN=build/x86_64/donos.bin
 
 # 内核不主动退出，timeout(124) 是正常结束；其他非零视为失败。
 set +e

@@ -5,8 +5,8 @@
  * 与 x86_64 的 arch.h 对外提供同一组控制台函数；基座只依赖
  * report.h 里声明的这几个名字，不知道自己跑在哪种处理器上。
  */
-#ifndef LITEOS_ARCH_H
-#define LITEOS_ARCH_H
+#ifndef DONOS_ARCH_H
+#define DONOS_ARCH_H
 
 #include "types.h"
 
@@ -126,4 +126,4 @@ extern char arch_probe_exec_resume[];
 /* 打印并核对当前保护状态；返回失败计数。 */
 int arch_mmu_verify(void);
 
-#endif /* LITEOS_ARCH_H */
+#endif /* DONOS_ARCH_H */

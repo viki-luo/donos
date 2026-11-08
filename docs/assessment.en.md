@@ -1,4 +1,4 @@
-# liteOS Security, Reliability, and Performance Assessment
+# DONos Security, Reliability, and Performance Assessment
 
 > Subject: current x86_64 and riscv64 prototype  
 > Environment: QEMU, 100 Hz execution tick  
@@ -6,7 +6,7 @@
 
 ## 1. Executive summary
 
-The current liteOS prototype demonstrates that its core model is executable: the base tracks wire validity and forwards one motion primitive, while objects retain their own state, resolve reference frames, and are advanced by an external execution layer. x86_64 and riscv64 use the same `base/` implementation and run the same semantic and stress tests.
+The current DONos prototype demonstrates that its core model is executable: the base tracks wire validity and forwards one motion primitive, while objects retain their own state, resolve reference frames, and are advanced by an external execution layer. x86_64 and riscv64 use the same `base/` implementation and run the same semantic and stress tests.
 
 What the evidence supports:
 
@@ -145,7 +145,7 @@ satp = 0x8000000000080217  (MODE=8 Sv39)
 
 The security verdict must therefore be phrased as:
 
-> liteOS has demonstrated sound rejection behavior at handle and capacity boundaries and page-level permissions are now enabled on both architectures (x86_64 NX+WP to the extent the current granularity allows; riscv64 Sv39 reaching W^X). It still has no user mode and no brain sandbox, and no authority model; production memory security is not yet achieved.
+> DONos has demonstrated sound rejection behavior at handle and capacity boundaries and page-level permissions are now enabled on both architectures (x86_64 NX+WP to the extent the current granularity allows; riscv64 Sv39 reaching W^X). It still has no user mode and no brain sandbox, and no authority model; production memory security is not yet achieved.
 
 ## 5. Reliability assessment
 
@@ -210,11 +210,11 @@ The automated budgets are p99.9 below 50% of one 100 Hz tick and maximum below 7
 
 For the currently defined prototype workload, the defensible statement is:
 
-> liteOS meets the current function-level tail-latency budgets on the deterministic QEMU regression baseline; real hardware and end-to-end real-time behavior are not yet accepted.
+> DONos meets the current function-level tail-latency budgets on the deterministic QEMU regression baseline; real hardware and end-to-end real-time behavior are not yet accepted.
 
 The following statement is not supported:
 
-> liteOS has been proven extremely fast for every processor and production workload.
+> DONos has been proven extremely fast for every processor and production workload.
 
 The current tests run in QEMU with a fixed workload and do not include a real control loop, SMP, cache pressure, network interrupt storms, or silicon measurements.
 
@@ -255,6 +255,6 @@ The current tests run in QEMU with a fixed workload and do not include a real co
 
 The accurate final statement is:
 
-> liteOS has moved from a concept to an executable, measurable, and reproducible dual-architecture prototype. Its motion-control model, handle boundaries, function-level tail latency, long-duration behaviour and interrupt-storm recovery all have reproducible measurements or gate evidence, and page-level permissions have been confirmed by real violating accesses on both architectures. **Security isolation, user mode, a brain sandbox, multi-core concurrency and real-hardware real-time behaviour are still absent** — they are not properties the prototype already possesses.
+> DONos has moved from a concept to an executable, measurable, and reproducible dual-architecture prototype. Its motion-control model, handle boundaries, function-level tail latency, long-duration behaviour and interrupt-storm recovery all have reproducible measurements or gate evidence, and page-level permissions have been confirmed by real violating accesses on both architectures. **Security isolation, user mode, a brain sandbox, multi-core concurrency and real-hardware real-time behaviour are still absent** — they are not properties the prototype already possesses.
 
 **No row in this table may claim "pass" without an evidence grade**; any new conclusion must state its source grade, or it is a documentation defect.

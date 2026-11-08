@@ -34,9 +34,9 @@ fi
 
 img_path() {
         if [ -n "$IMG_SUBDIR" ]; then
-                printf 'build/%s/%s/liteos.bin' "$1" "$IMG_SUBDIR"
+                printf 'build/%s/%s/donos.bin' "$1" "$IMG_SUBDIR"
         else
-                printf 'build/%s/liteos.bin' "$1"
+                printf 'build/%s/donos.bin' "$1"
         fi
 }
 

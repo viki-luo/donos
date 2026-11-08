@@ -16,8 +16,8 @@
  * 这条「只观察不干预」由 monitor_verify() 的 before/after 比对证明：
  * 一次 poll 之后，所有物件的状态必须逐字段不变。
  */
-#ifndef LITEOS_MONITOR_H
-#define LITEOS_MONITOR_H
+#ifndef DONOS_MONITOR_H
+#define DONOS_MONITOR_H
 
 #include "object.h"
 

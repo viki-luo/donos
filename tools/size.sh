@@ -64,7 +64,7 @@ check_le() {
 
 measure() {
         local arch="$1"
-        local image="build/$1${BUILD_SUBDIR:+/$BUILD_SUBDIR}/liteos.bin"
+        local image="build/$1${BUILD_SUBDIR:+/$BUILD_SUBDIR}/donos.bin"
         local text rodata data note load bss_start bss_end bss stack_bottom stack_top stack page_tables static_ram
 
         test -s "$image" || { echo "missing image: $image" >&2; exit 1; }

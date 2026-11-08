@@ -53,7 +53,7 @@ static void put_fixed(motion_fixed_t v)
 
 void kernel_main(u32 magic, u32 info)
 {
-        arch_puts("=== liteOS ===\n");
+        arch_puts("=== DONos ===\n");
 
         arch_puts("[boot] magic = 0x");
         arch_puthex32(magic);
@@ -103,12 +103,12 @@ void kernel_main(u32 magic, u32 info)
          * 其余大页打 NX、CR0.WP 置位。
          *
          * 这条路径**无条件执行**：它不是测试，是产品的一部分。
-         * 验证（故意违规访问）只在 LITEOS_SELFTEST=1 时编入。
+         * 验证（故意违规访问）只在 DONOS_SELFTEST=1 时编入。
          */
         if (!arch_mmu_enable())
                 arch_puts("\n!! this CPU has no NX; W^X is not available\n");
 
-#if LITEOS_SELFTEST
+#if DONOS_SELFTEST
         if (arch_mmu_verify() != 0)
                 arch_puts("\n!! MMU isolation did not take\n");
 #endif
@@ -118,7 +118,7 @@ void kernel_main(u32 magic, u32 info)
          *
          * 自检是证明手段，不是产品：发布镜像不编入这些代码。
          */
-#if LITEOS_SELFTEST
+#if DONOS_SELFTEST
         base_verify();
 
         /*
@@ -158,7 +158,7 @@ void kernel_main(u32 magic, u32 info)
          * 只观察、不干预：它的出口是事件，不是命令。
          * 自检本身证明「一次轮询之后物件状态逐字段不变」。
          */
-#if LITEOS_SELFTEST
+#if DONOS_SELFTEST
         monitor_verify();
 #endif
 

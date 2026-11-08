@@ -2,7 +2,7 @@
 
 [English](conformance.en.md) | 简体中文
 
-本文定义一个运动物件要接入 liteOS 基座必须满足的条件。
+本文定义一个运动物件要接入 DONos 基座必须满足的条件。
 设计依据见 [design.md](design.md)，尤其是 §3.6–3.8 的双向接口契约。
 
 ---

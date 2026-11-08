@@ -10,7 +10,7 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
 if [ -d /ucrt64/bin ]; then export PATH=/usr/bin:/bin:/ucrt64/bin:$PATH; fi
 
-BIN=build/x86_64/liteos.bin
+BIN=build/x86_64/donos.bin
 LOG=${1:-build/serial.log}
 
 if [ ! -f "$BIN" ]; then

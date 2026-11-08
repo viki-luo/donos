@@ -14,8 +14,8 @@
  *      尾延迟预算门禁；中断暴露的端到端延迟必须由独立场景另测
  *   5. 压力下的行为：表满、反复插拔、伪造句柄
  */
-#ifndef LITEOS_BENCH_H
-#define LITEOS_BENCH_H
+#ifndef DONOS_BENCH_H
+#define DONOS_BENCH_H
 
 /*
  * 运行全部测量与压力测试，结果打印到控制台。
@@ -23,4 +23,4 @@
  */
 int bench_run(void);
 
-#endif /* LITEOS_BENCH_H */
+#endif /* DONOS_BENCH_H */

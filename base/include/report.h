@@ -7,8 +7,8 @@
  *
  * 这样 base/ 下的测试代码不必去包含 x86 的头文件，分层不会被测试破坏。
  */
-#ifndef LITEOS_REPORT_H
-#define LITEOS_REPORT_H
+#ifndef DONOS_REPORT_H
+#define DONOS_REPORT_H
 
 #include "types.h"
 
@@ -51,4 +51,4 @@ void arch_timer_hz(u32 hz);
 void arch_irq_enable(void);
 void arch_irq_disable(void);
 
-#endif /* LITEOS_REPORT_H */
+#endif /* DONOS_REPORT_H */

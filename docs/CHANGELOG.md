@@ -10,6 +10,11 @@
 
 ## [Unreleased] / 未发布
 
+### Changed / 变更 — **项目更名为 DONos**
+
+- **项目名从 liteOS 改为 DONos**：改名覆盖三种形态 —— 正文 `liteOS` → `DONos`、宏与头文件保护 `LITEOS_*` → `DONOS_*`（含 `DONOS_SELFTEST`）、镜像名 `liteos.bin` → `donos.bin`。涉及 42 个文件：源码、链接脚本、Makefile、`tools/*.sh`、`.github/workflows/*.yml`、`CITATION.cff`、`LICENSE` 首行与全部中英文文档。全库已核对无旧名残留。**注意**：`DONos` 与华为的 `LiteOS` 无关，改名同时消除了这一名称撞车
+  / **the project is renamed from liteOS to DONos**: the rename covers three forms — prose `liteOS` → `DONos`, macros and header guards `LITEOS_*` → `DONOS_*` (including `DONOS_SELFTEST`), and the image name `liteos.bin` → `donos.bin`. It touches 42 files: sources, linker scripts, the Makefile, `tools/*.sh`, `.github/workflows/*.yml`, `CITATION.cff`, the first line of `LICENSE` and every bilingual document. The tree was checked for leftovers and none remain. **Note**: `DONos` is unrelated to Huawei's `LiteOS`; the rename also removes that name collision
+
 ### Changed / 变更 — **许可证：MIT → GPL-2.0-only**
 
 - **项目许可证改为 GPL-2.0-only，并给每个源文件加上机器可读的 SPDX 标识**：`LICENSE` 现在是 GNU GPL v2 全文；全部 64 个源文件（`.c`/`.h`/`.asm`/`.S`/`.ld`/`.sh`/`Makefile`）首行都带 `SPDX-License-Identifier: GPL-2.0-only`，`.sh` 保留 shebang 在首行。`README` 徽章与 `CITATION.cff` 的 `license` 字段同步。**这是实质性变更**：GPL-2.0-only 是强著性许可，分发衍生作品必须以同一许可提供完整源码，不能再改为闭源。新增门禁 `make check-spdx` 逐文件断言标识存在、且与 `LICENSE` 一致 —— 只写在 README 里的一句话挡不住「某个文件被单独拿走时没有任何许可证信息」这个真实风险
