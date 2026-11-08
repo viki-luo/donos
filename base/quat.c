@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * quat.c — checked Q32.32 quaternion products and normalisation.
  *

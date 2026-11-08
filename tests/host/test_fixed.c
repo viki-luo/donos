@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /* Host-side boundary tests for base/fixed.c. */
 #include <inttypes.h>
 #include <stdint.h>

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * test_wire.c — 接线句柄的世代纪律（宿主侧白盒测试）
  *

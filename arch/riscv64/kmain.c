@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * kmain.c — riscv64 内核入口（QEMU virt + OpenSBI）
  *

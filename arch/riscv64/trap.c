@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * trap.c — riscv64 陷阱处理（QEMU virt + OpenSBI）
  *

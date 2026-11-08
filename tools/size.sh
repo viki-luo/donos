@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # size.sh - reproducible image and static-memory budget gate
 #
 # Uses ELF allocated sections rather than host objcopy output. The installed

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * bench.c - measured cost of the single primitive and of the execution
  * layer, plus the base's behaviour under stress.

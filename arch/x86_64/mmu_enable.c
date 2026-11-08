@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * mmu_enable.c — x86_64 分页保护：装上去，不做探测
  *

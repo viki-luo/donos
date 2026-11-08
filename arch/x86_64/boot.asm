@@ -1,3 +1,4 @@
+; SPDX-License-Identifier: GPL-2.0-only
 ; boot.asm — x86_64 引导入口（PVH 模式）
 ;
 ; 关键事实：XEN_ELFNOTE_PHYS32_ENTRY 里的 PHYS32 就是「32 位入口」。

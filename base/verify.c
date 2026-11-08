@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * verify.c — 基座语义与统一模型的验证
  *

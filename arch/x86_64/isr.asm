@@ -1,3 +1,4 @@
+; SPDX-License-Identifier: GPL-2.0-only
 ; isr.asm — 中断与异常入口存根（x86_64）
 ;
 ; 每个向量一个存根，统一压入 [向量号, 错误码] 后跳到公共处理流程。

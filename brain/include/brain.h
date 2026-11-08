@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * brain.h — 上层大脑（基座之外）
  *

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 # liteOS — 构建系统
 #
 # 工具链：clang + lld（能输出裸机 ELF），nasm，qemu
@@ -438,6 +439,27 @@ check-slim:
 #   (a) 源码里不得出现并发原语 —— 出现即说明有人开始做 SMP，而表还没有锁；
 #   (b) 中断入口不得执行运动环 —— 否则主循环与 ISR 会在无锁表上重入；
 #   (c) 设计文档必须同时存在中英文的并发模型章节，声明不能只活在代码注释里。
+# 许可证门禁：每个源文件都必须带 SPDX 标识，且与 LICENSE 一致。
+#
+# SPDX 头是机器可读的许可证声明。没有它，代码一旦被拆走一个文件，
+# 那个文件就没有任何许可证信息 —— 这在实际分发里是真实的法律风险。
+# 因此这里逐文件断言，而不是只在 README 里写一句。
+check-spdx:
+	@set -e; \
+	if grep -q 'SPDX-License-Identifier' LICENSE && \
+	   ! grep -q 'GPL-2.0-only' LICENSE; then \
+		echo "LICENSE 里的 SPDX 标识不是 GPL-2.0-only"; exit 1; \
+	fi; \
+	missing=$$(find . -path ./build -prune -o -path ./.git -prune -o -type f \
+		\( -name '*.c' -o -name '*.h' -o -name '*.asm' -o -name '*.S' \
+		   -o -name '*.ld' -o -name '*.sh' -o -name 'Makefile' \) -print \
+		| xargs grep -L 'SPDX-License-Identifier: GPL-2.0-only' 2>/dev/null || true); \
+	if [ -n "$$missing" ]; then \
+		echo "以下源文件缺少 SPDX-License-Identifier: GPL-2.0-only"; \
+		echo "$$missing"; exit 1; \
+	fi; \
+	echo "  ok   所有源文件都带 GPL-2.0-only 的 SPDX 标识"
+
 check-single-core:
 	@set -e; \
 	if hits=$$(grep -rInE '__atomic|_Atomic|spinlock|spin_lock|mutex|memory_order|__sync_' \
@@ -457,7 +479,7 @@ check-single-core:
 	done; \
 	echo "  ok   单核、不可重入：无并发原语，中断不跑运动环，模型已声明"
 
-check-release: check-symbols check-docs check-purity check-single-core
+check-release: check-symbols check-docs check-purity check-single-core check-spdx
 	@echo "=== 发布前门禁通过 / release gate passed ==="
 
 check-all: check bench-latency check-size check-slim host-test fuzz \

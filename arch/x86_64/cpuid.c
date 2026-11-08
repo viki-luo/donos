@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * cpuid.c — CPUID 能力探测（x86_64 架构层）
  *

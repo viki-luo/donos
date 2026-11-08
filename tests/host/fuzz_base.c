@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * fuzz_base.c — 基座/物件/定点层的确定性模糊驱动器（宿主侧）
  *

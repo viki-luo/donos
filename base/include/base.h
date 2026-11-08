@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * base.h — liteOS 基座接口（硬件无关）
  *

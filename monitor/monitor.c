@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * monitor.c — 基座之外的安全监视（只观察，不干预）
  *

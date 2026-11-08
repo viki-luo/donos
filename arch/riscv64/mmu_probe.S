@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * mmu_probe.S - recoverable Sv39 fault probes
  *

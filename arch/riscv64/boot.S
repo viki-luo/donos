@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * boot.S — riscv64 入口（QEMU virt + OpenSBI，S 态）
  *

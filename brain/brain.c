@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * brain.c — 上层大脑的参考实现（基座之外）
  *

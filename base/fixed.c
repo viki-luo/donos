@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /* fixed.c — checked Q32.32 arithmetic */
 #include "fixed.h"
 

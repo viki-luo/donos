@@ -10,6 +10,11 @@
 
 ## [Unreleased] / 未发布
 
+### Changed / 变更 — **许可证：MIT → GPL-2.0-only**
+
+- **项目许可证改为 GPL-2.0-only，并给每个源文件加上机器可读的 SPDX 标识**：`LICENSE` 现在是 GNU GPL v2 全文；全部 64 个源文件（`.c`/`.h`/`.asm`/`.S`/`.ld`/`.sh`/`Makefile`）首行都带 `SPDX-License-Identifier: GPL-2.0-only`，`.sh` 保留 shebang 在首行。`README` 徽章与 `CITATION.cff` 的 `license` 字段同步。**这是实质性变更**：GPL-2.0-only 是强著性许可，分发衍生作品必须以同一许可提供完整源码，不能再改为闭源。新增门禁 `make check-spdx` 逐文件断言标识存在、且与 `LICENSE` 一致 —— 只写在 README 里的一句话挡不住「某个文件被单独拿走时没有任何许可证信息」这个真实风险
+  / **the project licence changes from MIT to GPL-2.0-only, with a machine-readable SPDX tag in every source file**: `LICENSE` now carries the full GNU GPL v2 text, and all 64 source files (`.c`/`.h`/`.asm`/`.S`/`.ld`/`.sh`/`Makefile`) start with `SPDX-License-Identifier: GPL-2.0-only` (scripts keep the shebang on line 1). The README badge and the `CITATION.cff` licence field were updated too. **This is a substantive change**: GPL-2.0-only is a copyleft licence, so derived works must ship complete source under the same licence and can no longer be closed. The new `make check-spdx` gate asserts the tag per file and that it agrees with `LICENSE` — a sentence in the README cannot prevent the real risk of a single file being taken away with no licence information at all
+
 ### Changed / 变更 — **破坏性：事件结构与 `motion[]` 语义**
 
 - **`motion[]` 的量纲冻结**（设计决定 18）：此前 `motion` 的含义随物件而定，

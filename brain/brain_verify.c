@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * brain_verify.c — 大脑热切换的确定性自检（基座之外）
  *

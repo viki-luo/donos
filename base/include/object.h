@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * object.h — 物件侧接口（参考实现）
  *

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * monitor_verify.c — 监视器的确定性自检（基座之外）
  *

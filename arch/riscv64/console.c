@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * console.c — riscv64 串口控制台（QEMU virt 的 16550 UART）
  *

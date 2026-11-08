@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * mmu_verify.c — 分页保护的确定性自检
  *

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # build.sh — 在 MSYS2 环境下构建 liteOS
 #
 # 之所以需要这个脚本而不是直接 make：

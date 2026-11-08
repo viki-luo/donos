@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # run-trace.sh — 在 QEMU 中启动并把串口输出写入文件
 #
 # 之所以写文件而不是直接看终端：

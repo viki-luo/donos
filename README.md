@@ -4,7 +4,7 @@
 >
 > *Everything is motion. The base manages only motion control — stateless, and any brain can ride it.*
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](LICENSE)
 [![Language: C](https://img.shields.io/badge/language-C11-blue.svg)](https://en.wikipedia.org/wiki/C11_(C_standard_revision))
 [![Status: Prototype](https://img.shields.io/badge/status-prototype-orange.svg)](#项目状态--project-status)
 [![Docs: bilingual](https://img.shields.io/badge/docs-%E4%B8%AD%E8%8B%B1%E5%8F%8C%E8%AF%AD%20%7C%20bilingual-informational.svg)](docs/README.md)
@@ -189,4 +189,5 @@ exception handler, build once with `make FAULT_TEST=1`.*
 
 ## 许可证 / License
 
-[MIT](LICENSE)
+[GPL-2.0-only](LICENSE) — 强著性许可：分发衍生作品必须以同一许可提供完整源码
+/ [GPL-2.0-only](LICENSE) — copyleft: derived works must be distributed under the same licence with complete source

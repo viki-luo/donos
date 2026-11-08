@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * idt.c — IDT、8259 PIC、PIT 与异常派发
  *

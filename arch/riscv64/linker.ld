@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * linker.ld — riscv64（QEMU virt + OpenSBI）
  *

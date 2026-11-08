@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # bench.sh — 在两个架构上跑同一套测量，并把关键数字并排列出
 #
 # 为什么要有这个脚本：

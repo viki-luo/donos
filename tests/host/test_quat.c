@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * test_quat.c — host-side attitude integration and travel-limit boundaries.
  *

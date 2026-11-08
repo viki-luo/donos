@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /* quat.h — object-side checked quaternion integration helpers. */
 #ifndef LITEOS_QUAT_H
 #define LITEOS_QUAT_H

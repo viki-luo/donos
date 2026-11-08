@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * mmu.c — riscv64 Sv39 page tables
  *

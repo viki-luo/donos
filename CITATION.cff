@@ -7,7 +7,7 @@ abstract: >-
   brain. Everything is treated as a motion object; the base is the only
   non-object. It runs on x86_64 and riscv64 and is verified under QEMU on both.
 type: software
-license: MIT
+license: GPL-2.0-only
 
 authors:
   - name: "liteOS contributors"
@@ -40,6 +40,6 @@ identifiers:
 preferred-citation:
   type: software
   title: "liteOS: a stateless motion-control base"
-  license: MIT
+  license: GPL-2.0-only
   authors:
     - name: "liteOS contributors"

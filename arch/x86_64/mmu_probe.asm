@@ -1,3 +1,4 @@
+; SPDX-License-Identifier: GPL-2.0-only
 ; mmu_probe.asm — recoverable #PF probes (x86_64)
 ;
 ; The #PF dispatcher validates the exact error code, saved RIP and CR2 before

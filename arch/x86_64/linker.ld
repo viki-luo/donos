@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * linker.ld — x86_64 内核链接脚本（PVH 引导）
  *

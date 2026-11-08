@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * pci.c — PCI 总线驱动（物件发现的真实来源）
  *
