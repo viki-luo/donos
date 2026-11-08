@@ -217,6 +217,7 @@ clean:
 # 符号门禁：镜像必须存在、非空，且不含任何未定义符号。
 # 裸机没有运行时库可链接，所以任何 ' U ' 符号都是运行时跳向地址零。
 .PHONY: check-symbols check-docs check-release check-all check-purity \
+        check-single-core check-size bench-latency fuzz \
         host-test sanitize
 check-symbols:
 	@set -e; \
@@ -360,7 +361,30 @@ check-size:
 	tools/size.sh | tee build/size.log; \
 	grep -q '^  size failures = 0$$' build/size.log || { echo "体积或静态内存超出预算"; exit 1; }
 
-check-release: check-symbols check-docs check-purity
+# 单核门禁：把「目前只支持单核」从形容词变成可证伪的事实。
+#   (a) 源码里不得出现并发原语 —— 出现即说明有人开始做 SMP，而表还没有锁；
+#   (b) 中断入口不得执行运动环 —— 否则主循环与 ISR 会在无锁表上重入；
+#   (c) 设计文档必须同时存在中英文的并发模型章节，声明不能只活在代码注释里。
+check-single-core:
+	@set -e; \
+	if hits=$$(grep -rInE '__atomic|_Atomic|spinlock|spin_lock|mutex|memory_order|__sync_' \
+		base brain monitor drivers arch base/include 2>/dev/null); then \
+		echo "源码出现并发原语，但接线表与物件表尚未加锁（见 docs/design.md 并发模型）:"; \
+		echo "$$hits"; exit 1; \
+	fi; \
+	for f in arch/x86_64/idt.c arch/x86_64/isr.asm arch/riscv64/trap.c arch/riscv64/traps.S; do \
+		if hits=$$(grep -nE 'object_run|base_apply|object_step' $$f); then \
+			echo "$$f 在中断路径里执行运动环（会造成无锁重入）:"; \
+			echo "$$hits"; exit 1; \
+		fi; \
+	done; \
+	for d in docs/design.md docs/design.en.md; do \
+		grep -qE '^## (9|10)\. (并发模型|Concurrency model)' $$d || { \
+			echo "$$d 缺少并发模型章节"; exit 1; }; \
+	done; \
+	echo "  ok   单核、不可重入：无并发原语，中断不跑运动环，模型已声明"
+
+check-release: check-symbols check-docs check-purity check-single-core
 	@echo "=== 发布前门禁通过 / release gate passed ==="
 
 check-all: check bench-latency check-size host-test fuzz sanitize check-release

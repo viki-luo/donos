@@ -396,7 +396,24 @@ Just as IP is the narrow waist of the network: everything passes over it, yet ap
 
 ---
 
-## 9. Open questions
+## 9. Concurrency model (explicitly declared)
+
+**liteOS is currently a single-core, non-reentrant, lock-free implementation. That is not an omission; it is a claim checked by a gate.**
+
+Four concrete meanings:
+
+1. **Exactly one hart runs C code at a time.** Both architectures enable one core; `base/`, `object.c`, `brain/` and `monitor/` contain no spin locks, atomics or memory-order annotations.
+2. **Interrupt handlers never execute the motion loop.** The timer interrupt does three things on both architectures: count the tick, rearm the next compare value, and (during fault injection) resolve an expected exception. `object_run()` and `base_apply()` are only ever called from the main loop — moving them into an ISR would make the main loop and the ISR re-enter unlocked tables.
+3. **The wiring and object tables are not thread-safe.** The "visible means ready" publish order in `base_arrive()`, `base_depart()`, `object_plug()` and `object_unplug()` is a **single-writer** correctness argument: no reader can observe half an object, but two concurrent writers are undefined.
+4. **The caller orders the monitor against the execution layer.** `monitor_poll()` only consumes an `object_run_status_t` that already happened and advances nothing, so "execute first, then observe" is the caller's responsibility.
+
+**This is not a verified multi-core implementation; it is an explicit statement that multi-core is unsupported.** Entering SMP requires: locks or per-core sharding for the wiring and object tables, memory-ordering rules, cross-core wakeup and IPI, and a scheduling decision about which core a brain runs on. Until those exist, no claim that liteOS supports multi-core concurrency holds.
+
+**Gate**: `make check-single-core` asserts three things — (a) no concurrency primitive such as `__atomic`, `_Atomic`, `spinlock`, `mutex`, `memory_order` or `__sync_` appears in the sources; (b) the interrupt entry points on both architectures (`idt.c`, `isr.asm`, `trap.c`, `traps.S`) do not call `object_run`, `base_apply` or `object_step`; (c) this section and its Chinese counterpart both exist. Breaking any one of them fails the gate — so "single-core" is a falsifiable fact rather than an adjective in the documentation.
+
+---
+
+## 10. Open questions
 
 - [x] First runnable target: x86_64 + QEMU, serial self-test and bus discovery
 - [ ] Scale and update semantics of the wiring table
