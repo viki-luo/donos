@@ -40,25 +40,42 @@ int arch_mmu_verify(void)
 
         arch_puts("\n--- MMU: what the page tables now enforce ---\n\n");
 
-        bool nx = arch_mmu_enable_nx();
+        /*
+         * 自检走的是与发布镜像完全相同的装保护路径：arch_mmu_enable()。
+         * 若自检自己另装一遍，通过的就只是「自检版本的隔离」。
+         */
+        bool nx = arch_mmu_enable();
         mcheck("NXE is supported by this CPU and now enabled", nx);
 
         if (nx) {
                 /*
-                 * 先把第 0 个大页拆成 4 KiB 页，再给其余大页打 NX。
-                 *
-                 * 顺序不能反：拆分之后 .text 才真正 R|X、数据才真正 RW|NX，
-                 * 完整 W^X 由此成立；此前只有「2 MiB 以上不可执行」。
+                 * 断言的是**表里的结果**，不是函数的返回值。
+                 * arch_mmu_enable() 做完拆分与打 NX 之后，这里逐项读回：
+                 * 第 0 项应当是页表指针，其余 511 项应当都是 NX 大页。
                  */
-                u32 split = arch_mmu_split_kernel();
+                u32 mapped = 0;
+
+                for (u32 i = 0; i < 512; i++)
+                        if (arch_mmu_pte(i) != 0)
+                                mapped++;
+
                 arch_puts("  note: 4 KiB pages built in the kernel's 2 MiB region = ");
-                arch_putdec(split);
+                arch_putdec(mapped);
                 arch_puts("\n");
                 mcheck("the kernel region is now mapped with 4 KiB pages",
-                      split > 0);
+                      mapped > 0);
 
-                u32 marked = arch_mmu_mark_data_nx();
-                arch_puts("  note: large pages marked non-executable = ");
+                u32 marked = 0;
+
+                for (u32 i = 1; i < 512; i++) {
+                        u64 e = arch_mmu_entry(i);
+
+                        if ((e & 0x001ULL) != 0 && (e & 0x080ULL) != 0 &&
+                            (e & (1ULL << 63)) != 0)
+                                marked++;
+                }
+
+                arch_puts("  note: large pages found non-executable = ");
                 arch_putdec(marked);
                 arch_puts(" of 511 available\n");
                 mcheck("every remaining 2 MiB page is non-executable",

@@ -98,13 +98,26 @@ void kernel_main(u32 magic, u32 info)
          * ---- 4.5 MMU 隔离 ----
          *
          * 上一步打印的是**装保护之前**的事实。这一步把能装的装上：
-         * NXE 置位、2 MiB 以上的大页不可执行、CR0.WP 置位（内核写也
-         * 要守只读位）。装完自报，两次输出放在一起，差别自己看得出来。
+         * NXE 置位、第 0 个大页拆成 4 KiB 页（代码 R|X、数据 R|W）、
+         * 其余大页打 NX、CR0.WP 置位。
+         *
+         * 这条路径**无条件执行**：它不是测试，是产品的一部分。
+         * 验证（故意违规访问）只在 LITEOS_SELFTEST=1 时编入。
          */
+        if (!arch_mmu_enable())
+                arch_puts("\n!! this CPU has no NX; W^X is not available\n");
+
+#if LITEOS_SELFTEST
         if (arch_mmu_verify() != 0)
                 arch_puts("\n!! MMU isolation did not take\n");
+#endif
 
-        /* ---- 5. 验证 ---- */
+        /*
+         * ---- 5. 验证与测量（仅自检构建） ----
+         *
+         * 自检是证明手段，不是产品：发布镜像不编入这些代码。
+         */
+#if LITEOS_SELFTEST
         base_verify();
 
         /*
@@ -136,14 +149,17 @@ void kernel_main(u32 magic, u32 info)
          * 真实的时间回退。
          */
         brain_verify();
+#endif
 
         /*
-         * ---- 6.6 基座之外的监视器 ----
+         * ---- 6.6 基座之外的监视器（仅自检构建） ----
          *
          * 只观察、不干预：它的出口是事件，不是命令。
          * 自检本身证明「一次轮询之后物件状态逐字段不变」。
          */
+#if LITEOS_SELFTEST
         monitor_verify();
+#endif
 
         /*
          * ---- 7. 运行：PIT 节拍驱动执行层 ----

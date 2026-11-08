@@ -22,6 +22,23 @@ fi
 
 ARCHES="${1:-x86_64 riscv64}"
 
+# 证据构建与发布构建输出到不同目录：自检/基准跑的是 SELFTEST=1 那份，
+# 因为它才含 bench 代码；发布镜像不含任何证据代码。
+SELFTEST="${SELFTEST:-1}"
+if [ "$SELFTEST" = "1" ]; then
+        IMG_SUBDIR="selftest"
+else
+        IMG_SUBDIR=""
+fi
+
+img_path() {
+        if [ -n "$IMG_SUBDIR" ]; then
+                printf 'build/%s/%s/liteos.bin' "$1" "$IMG_SUBDIR"
+        else
+                printf 'build/%s/liteos.bin' "$1"
+        fi
+}
+
 # 运行 QEMU：内核不主动退出，因此 timeout(124) 是正常结束；
 # 其他非零退出（镜像错误、启动即崩）视为失败。
 # Run QEMU: the kernel never exits on its own, so timeout (124) is the normal
@@ -49,7 +66,7 @@ run_x86_64() {
         run_qemu build/bench-x86_64.log 30 \
                 qemu-system-x86_64 \
                 -icount shift=0,align=off,sleep=off \
-                -kernel build/x86_64/liteos.bin \
+                -kernel "$(img_path x86_64)" \
                 -m 256M \
                 -serial file:build/bench-x86_64.log \
                 -display none -no-reboot -no-shutdown
@@ -63,7 +80,7 @@ run_riscv64() {
                 qemu-system-riscv64 \
                 -icount shift=0,align=off,sleep=off \
                 -machine virt -bios default -m 256M \
-                -kernel build/riscv64/liteos.bin \
+                -kernel "$(img_path riscv64)" \
                 -device e1000 \
                 -serial file:build/bench-riscv64.log \
                 -display none -no-reboot
@@ -73,9 +90,9 @@ run_riscv64() {
 
 for a in $ARCHES; do
         case "$a" in
-                x86_64)  [ -f build/x86_64/liteos.bin ]  || { echo "缺少 x86_64 镜像，先 make ARCH=x86_64";  exit 1; }
+                x86_64)  [ -f "$(img_path x86_64)" ]  || { echo "缺少 x86_64 镜像，先 make ARCH=x86_64 SELFTEST=$SELFTEST";  exit 1; }
                          run_x86_64 ;;
-                riscv64) [ -f build/riscv64/liteos.bin ] || { echo "缺少 riscv64 镜像，先 make ARCH=riscv64"; exit 1; }
+                riscv64) [ -f "$(img_path riscv64)" ] || { echo "缺少 riscv64 镜像，先 make ARCH=riscv64 SELFTEST=$SELFTEST"; exit 1; }
                          run_riscv64 ;;
                 *)       echo "未知架构: $a"; exit 1 ;;
         esac

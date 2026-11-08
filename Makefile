@@ -8,7 +8,10 @@
 #   make clean
 
 ARCH      ?= x86_64
-BUILD     ?= build/$(ARCH)
+# SELFTEST=1：把自检与基准编进镜像（用于验证）；默认 0 构建发布镜像。
+# 两者输出到不同目录，互不覆盖，因此 make check 与发布构建可以先后共存。
+SELFTEST  ?= 0
+BUILD     ?= build/$(ARCH)$(if $(filter 1,$(SELFTEST)),/selftest,)
 OUT       := liteos.bin
 
 # ---------------------------------------------------------------------
@@ -76,16 +79,47 @@ endif
 
 # ---------------------------------------------------------------------
 # 源文件
+#
+# 证据代码（自检、基准、故障探针）只在 SELFTEST=1 时编入。
+# 理由：自检是证明手段，不是产品的一部分。把它无条件链进发布镜像，
+# 会让每个部署都背着几十 KB 的测试代码 —— 而微内核的价值恰恰是「小」。
 # ---------------------------------------------------------------------
-C_SRCS := $(wildcard base/*.c) \
-          $(wildcard brain/*.c) \
-          $(wildcard monitor/*.c) \
-          $(wildcard drivers/*.c) \
-          $(wildcard arch/$(ARCH)/*.c)
+# 每个架构的「仅自检」文件不同：riscv64 的 mmu.c 是真正的建表代码
+# （无条件需要），而 x86_64 的 mmu.c 只是探测辅助。
+ifeq ($(ARCH),x86_64)
+SELFTEST_ONLY_C := base/verify.c base/bench.c brain/brain_verify.c \
+                   monitor/monitor_verify.c \
+                   arch/x86_64/mmu.c arch/x86_64/mmu_verify.c
+SELFTEST_ONLY_PROBE := arch/x86_64/mmu_probe.asm
+else
+SELFTEST_ONLY_C := base/verify.c base/bench.c brain/brain_verify.c \
+                   monitor/monitor_verify.c arch/riscv64/mmu_verify.c
+SELFTEST_ONLY_PROBE := arch/riscv64/mmu_probe.S
+endif
+
+C_SRCS := $(filter-out $(SELFTEST_ONLY_C), \
+            $(wildcard base/*.c) \
+            $(wildcard brain/*.c) \
+            $(wildcard monitor/*.c) \
+            $(wildcard drivers/*.c) \
+            $(wildcard arch/$(ARCH)/*.c))
 
 # x86_64 用 nasm（.asm）；riscv64 用 clang 汇编（.S）
-ASM_SRCS := $(wildcard arch/$(ARCH)/*.asm)
-S_SRCS   := $(wildcard arch/$(ARCH)/*.S)
+ASM_SRCS := $(filter-out arch/$(ARCH)/mmu_probe.asm, \
+              $(wildcard arch/$(ARCH)/*.asm))
+S_SRCS   := $(filter-out arch/$(ARCH)/mmu_probe.S, \
+              $(wildcard arch/$(ARCH)/*.S))
+
+# 故障注入探针只在自检构建里链接：它们的存在本身就是为了故意违约。
+ifeq ($(SELFTEST),1)
+CFLAGS   += -DLITEOS_SELFTEST=1
+C_SRCS   += $(SELFTEST_ONLY_C)
+ifneq ($(filter %.asm,$(SELFTEST_ONLY_PROBE)),)
+ASM_SRCS += $(SELFTEST_ONLY_PROBE)
+else
+S_SRCS   += $(SELFTEST_ONLY_PROBE)
+endif
+endif
 
 C_OBJS   := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS))
 ASM_OBJS := $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
@@ -157,10 +191,10 @@ size: $(BUILD)/$(OUT)
 # ---------------------------------------------------------------------
 bench-latency:
 	@set -e; \
-	$(MAKE) ARCH=x86_64 >/dev/null; \
-	$(MAKE) ARCH=riscv64 >/dev/null; \
+	$(MAKE) ARCH=x86_64 SELFTEST=1 >/dev/null; \
+	$(MAKE) ARCH=riscv64 SELFTEST=1 >/dev/null; \
 	rm -f build/bench-x86_64.log build/bench-riscv64.log; \
-	tools/bench.sh >/dev/null; \
+	SELFTEST=1 tools/bench.sh >/dev/null; \
 	for arch in x86_64 riscv64; do \
 		log=build/bench-$$arch.log; \
 		grep -q '^  latency p50     :' $$log || { echo "$$arch 缺少 p50"; exit 1; }; \
@@ -176,11 +210,11 @@ bench-latency:
 check:
 	@set -e; \
 	echo "=== 构建两个架构 / building both architectures ==="; \
-	$(MAKE) ARCH=x86_64 >/dev/null; \
-	$(MAKE) ARCH=riscv64 >/dev/null; \
+	$(MAKE) ARCH=x86_64 SELFTEST=1 >/dev/null; \
+	$(MAKE) ARCH=riscv64 SELFTEST=1 >/dev/null; \
 	echo "=== 运行测量与压力测试 / running measurements ==="; \
 	rm -f build/bench-x86_64.log build/bench-riscv64.log; \
-	tools/bench.sh >/dev/null 2>&1; \
+	SELFTEST=1 tools/bench.sh >/dev/null 2>&1; \
 	for arch in x86_64 riscv64; do \
 		log=build/bench-$$arch.log; \
 		test -s $$log || { echo "缺少日志 $$log"; exit 1; }; \
@@ -198,7 +232,7 @@ check:
 		grep -qE '^  brain failures = 0$$' $$log || { echo "$$arch 大脑热切换自检失败"; grep -E 'brain failures' $$log; exit 1; }; \
 		grep -qE '^  mmu failures = 0$$' $$log || { echo "$$arch MMU 自检失败"; grep -E 'mmu failures' $$log; exit 1; }; \
 		grep -q 'protection: what the MMU actually enforces' $$log || { echo "$$arch 未自报保护状态"; exit 1; }; \
-		if logs=$$($(NM) build/$$arch/liteos.bin 2>/dev/null | grep ' U ' | awk '{print $$2}'); \
+		if logs=$$($(NM) build/$$arch/selftest/liteos.bin 2>/dev/null | grep ' U ' | awk '{print $$2}'); \
 		   [ -n "$$logs" ]; then \
 			echo "$$arch 仍有未定义的运行时符号（裸机没有库可链接）:"; \
 			echo "$$logs"; exit 1; \
@@ -217,7 +251,7 @@ clean:
 # 符号门禁：镜像必须存在、非空，且不含任何未定义符号。
 # 裸机没有运行时库可链接，所以任何 ' U ' 符号都是运行时跳向地址零。
 .PHONY: check-symbols check-docs check-release check-all check-purity \
-        check-single-core check-size bench-latency fuzz \
+        check-single-core check-size check-slim bench-latency fuzz \
         host-test sanitize
 check-symbols:
 	@set -e; \
@@ -356,10 +390,49 @@ sanitize:
 
 check-size:
 	@set -e; \
-	$(MAKE) ARCH=x86_64 >/dev/null; \
-	$(MAKE) ARCH=riscv64 >/dev/null; \
-	tools/size.sh | tee build/size.log; \
-	grep -q '^  size failures = 0$$' build/size.log || { echo "体积或静态内存超出预算"; exit 1; }
+	$(MAKE) ARCH=x86_64 SELFTEST=1 >/dev/null; \
+	$(MAKE) ARCH=riscv64 SELFTEST=1 >/dev/null; \
+	SELFTEST=1 tools/size.sh | tee build/size.log; \
+	grep -q '^  size failures = 0$$' build/size.log || { echo "自检镜像体积或静态内存超出预算"; exit 1; }
+
+# 发布镜像门禁：证据代码必须不在里面，且镜像真的能跑。
+#
+# 这条门禁存在的理由很具体：自检曾被无条件链进内核，于是每次部署都
+# 背着几十 KB 测试代码，而 `make check` 全程绿灯。现在断言三件事：
+#   (a) 发布镜像里不存在任何自检/基准/故障探针符号；
+#   (b) 发布镜像体积落在更紧的预算内；
+#   (c) 发布镜像能启动、跑完 live 演示并报告「物件仍在运动」。
+check-slim:
+	@set -e; \
+	$(MAKE) ARCH=x86_64 SELFTEST=0 >/dev/null; \
+	$(MAKE) ARCH=riscv64 SELFTEST=0 >/dev/null; \
+	for arch in x86_64 riscv64; do \
+		bin=build/$$arch/liteos.bin; \
+		test -s $$bin || { echo "缺少发布镜像 $$bin"; exit 1; }; \
+		if hits=$$($(NM) $$bin 2>/dev/null | grep -E ' (base_verify|bench_run|monitor_verify|brain_verify|arch_mmu_verify)$$'); then \
+			echo "$$arch 发布镜像残留自检符号（证据不应随固件出货）:"; \
+			echo "$$hits"; exit 1; \
+		fi; \
+	done; \
+	SELFTEST=0 tools/size.sh | tee build/size-release.log; \
+	grep -q '^  size failures = 0$$' build/size-release.log || { echo "发布镜像体积超出预算"; exit 1; }; \
+	for arch in x86_64 riscv64; do \
+		log=build/release-$$arch.log; \
+		rm -f $$log; \
+		if [ "$$arch" = x86_64 ]; then \
+			timeout 40 qemu-system-x86_64 -icount shift=0,align=off,sleep=off \
+				-kernel build/x86_64/liteos.bin -m 256M \
+				-serial file:$$log -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true; \
+		else \
+			timeout 70 qemu-system-riscv64 -icount shift=0,align=off,sleep=off \
+				-machine virt -bios default -m 256M \
+				-kernel build/riscv64/liteos.bin -device e1000 \
+				-serial file:$$log -display none -no-reboot >/dev/null 2>&1 || true; \
+		fi; \
+		tr -d '\r' < $$log | grep -q 'objects keep moving' || { \
+			echo "$$arch 发布镜像没有跑到 live 演示"; tail -20 $$log; exit 1; }; \
+		echo "  ok   $$arch release image boots and runs"; \
+	done
 
 # 单核门禁：把「目前只支持单核」从形容词变成可证伪的事实。
 #   (a) 源码里不得出现并发原语 —— 出现即说明有人开始做 SMP，而表还没有锁；
@@ -387,5 +460,6 @@ check-single-core:
 check-release: check-symbols check-docs check-purity check-single-core
 	@echo "=== 发布前门禁通过 / release gate passed ==="
 
-check-all: check bench-latency check-size host-test fuzz sanitize check-release
+check-all: check bench-latency check-size check-slim host-test fuzz \
+           sanitize check-release
 	@echo "=== 全部门禁通过 / all gates passed ==="

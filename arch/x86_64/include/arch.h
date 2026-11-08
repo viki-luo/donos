@@ -103,8 +103,14 @@ void arch_report_protection(void);
 /* ------------------------------------------------------------------ */
 
 /*
- * 打开 EFER.NXE。CPU 不支持时返回 false —— 调用者必须据此决定是否
- * 报告「支持不可执行页」，而不是无条件声称已经支持。
+ * 装保护：唯一入口，发布镜像与自检镜像都走它。
+ * 返回 false 表示本机不支持 NX —— 此时无法做 W^X，调用者必须如实报告。
+ */
+bool arch_mmu_enable(void);
+
+/*
+ * 下面这些是**探测辅助**，只在 LITEOS_SELFTEST=1 的构建里存在。
+ * 发布镜像不链接它们 —— 发布镜像只需要上面的 arch_mmu_enable()。
  */
 bool arch_mmu_enable_nx(void);
 

@@ -105,17 +105,31 @@ test code.
 `tools/check-toolchain.sh`。引导细节（PVH、32→64 位切换）见
 [docs/boot.md](docs/boot.md)。
 
-运行两种架构的安全、可靠性与性能测量 / Run the security, reliability,
-and performance measurements on both architectures:
+## 两种构建 / Two builds
+
+**证据不随固件出货。** 默认构建产出发布镜像，不含任何自检或基准代码；
+自检与基准需要显式打开。
 
 ```sh
+# 发布镜像（默认，无自检/基准代码）
 make ARCH=x86_64
 make ARCH=riscv64
-tools/bench.sh
+make check-slim          # 断言发布镜像无自检符号、体积达标、能跑起来
 
-# 等价的一条命令（CI 跑的就是它）
-make check
+# 证据镜像（含全部自检、基准、故障注入探针）
+make ARCH=x86_64 SELFTEST=1
+make check               # 跑完 13 部分自检 + 长期运行 + 中断风暴
 ```
+
+实测体积：x86_64 代码段 69,632 → **24,576** 字节，加载体积 208,608 →
+**135,188**；riscv64 代码段 53,248 → **16,384**，加载体积 139,360 →
+**73,816**。
+
+*Evidence does not ship with the firmware. The default build produces the
+release image with no self-test or benchmark code; the evidence build needs an
+explicit switch.*
+
+## 评估结论 / Assessment
 
 评估结论必须同时阅读性能数字与安全限制：满表推进的 p99.9 与最大值约占
 100 Hz 节拍的 8.95%（x86_64）/ 7.66%（riscv64），这是 QEMU 确定性指令

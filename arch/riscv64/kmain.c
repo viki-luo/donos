@@ -65,15 +65,22 @@ void kernel_main(u64 hartid, u64 dtb)
         /*
          * 装 Sv39 页表。这一步之后还能打印出东西，本身就是翻译生效的证据；
          * 装不上就停在 Bare 上继续跑，并把原因报出来 —— 静默降级不可接受。
+         *
+         * 建表**无条件执行**（这是产品的一部分）；故障注入式验证只在
+         * LITEOS_SELFTEST=1 时编入。
          */
         if (arch_mmu_init() == 0) {
+#if LITEOS_SELFTEST
                 if (arch_mmu_verify() != 0)
                         arch_puts("\n!! page permissions are not W^X\n");
+#endif
         } else {
                 arch_puts("\n!! arch_mmu_init failed; staying in Bare mode\n");
         }
 
+#if LITEOS_SELFTEST
         base_verify();
+#endif
 
         /*
          * 定时器必须在测量之前启动：bench 的「一个节拍值多少个计数」
@@ -82,6 +89,7 @@ void kernel_main(u64 hartid, u64 dtb)
         arch_timer_init(hartid);
         arch_irq_enable();
 
+#if LITEOS_SELFTEST
         /* 测量：原语代价、参照链代价、最坏节拍占用、压力行为 */
         bench_run();
 
@@ -90,6 +98,7 @@ void kernel_main(u64 hartid, u64 dtb)
 
         /* 基座之外的监视器：只观察、不干预 */
         monitor_verify();
+#endif
 
         /*
          * 重新装订定时器，丢弃基准期间的积压。

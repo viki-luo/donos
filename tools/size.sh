@@ -15,12 +15,29 @@ fi
 
 # Budgets are deliberately above the measured baseline but close enough to
 # catch accidental growth. All values are bytes.
-X86_LOAD_MAX=$((224 * 1024))
-X86_STATIC_MAX=$((192 * 1024))
-X86_STACK_MAX=$((64 * 1024))
-RV_LOAD_MAX=$((160 * 1024))
-RV_STATIC_MAX=$((192 * 1024))
-RV_STACK_MAX=$((72 * 1024))
+#
+# 两套预算：发布镜像（SELFTEST=0）不含任何证据代码，因此限额明显更紧。
+# 证据构建保留更松的额度 —— 它是工具，不是产品。
+SELFTEST="${SELFTEST:-0}"
+
+if [ "$SELFTEST" = "1" ]; then
+        X86_LOAD_MAX=$((224 * 1024))
+        X86_STATIC_MAX=$((192 * 1024))
+        X86_STACK_MAX=$((64 * 1024))
+        RV_LOAD_MAX=$((160 * 1024))
+        RV_STATIC_MAX=$((192 * 1024))
+        RV_STACK_MAX=$((72 * 1024))
+        BUILD_SUBDIR="selftest"
+else
+        # 发布镜像：证据代码已剥离，超出下面这些数字就说明有东西又混进来了。
+        X86_LOAD_MAX=$((160 * 1024))
+        X86_STATIC_MAX=$((192 * 1024))
+        X86_STACK_MAX=$((64 * 1024))
+        RV_LOAD_MAX=$((112 * 1024))
+        RV_STATIC_MAX=$((192 * 1024))
+        RV_STACK_MAX=$((72 * 1024))
+        BUILD_SUBDIR=""
+fi
 
 num_section() {
         size -A "$1" | awk -v name="$2" '$1 == name { print $2; found=1 } END { if (!found) print 0 }'
@@ -45,7 +62,8 @@ check_le() {
 }
 
 measure() {
-        local arch="$1" image="build/$1/liteos.bin"
+        local arch="$1"
+        local image="build/$1${BUILD_SUBDIR:+/$BUILD_SUBDIR}/liteos.bin"
         local text rodata data note load bss_start bss_end bss stack_bottom stack_top stack page_tables static_ram
 
         test -s "$image" || { echo "missing image: $image" >&2; exit 1; }
@@ -91,7 +109,11 @@ measure() {
 }
 
 failures=0
-echo '=== image and static-memory budgets ==='
+if [ "$SELFTEST" = "1" ]; then
+        echo '=== image and static-memory budgets (SELFTEST=1, evidence build) ==='
+else
+        echo '=== image and static-memory budgets (release, no evidence code) ==='
+fi
 measure x86_64
 measure riscv64
 printf '  size failures = %s\n' "$failures"
