@@ -129,6 +129,15 @@ void arch_mmu_set_wp(bool on);
 /* 精确恢复一个 2 MiB 页目录项并刷新地址翻译。 */
 void arch_mmu_set_entry(u32 page_2mib, u64 entry);
 
+/*
+ * 把第 0 个 2 MiB 大页拆成 4 KiB 页，实现完整 W^X。
+ * 必须先 arch_mmu_enable_nx()。返回实际建立的页数。
+ */
+u32 arch_mmu_split_kernel(void);
+
+/* 读第 0 个 4 KiB 页表项（page_4kib 为 0..511，自检用）。 */
+u64 arch_mmu_pte(u32 page_4kib);
+
 /* 可恢复的预期 #PF，仅用于 MMU 自检。 */
 void arch_fault_expect(u64 error, u64 rip, u64 cr2, u64 resume);
 bool arch_fault_result(u64 *error, u64 *rip, u64 *cr2);

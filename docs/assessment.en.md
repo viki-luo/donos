@@ -119,9 +119,9 @@ x86_64 has 58 free slots because PCI discovery keeps six devices online. The ris
 ### 4.2 Confirmed security gaps
 
 #### x86_64 (currently installed)
-- EFER.NXE is set; all 511 2 MiB pages from 2 MiB up carry NX. The kernel's own page 0 (code, .rodata, .data/stack share it) remains RWX because 2 MiB is the only available page granularity.
-- CR0.WP is set: even kernel-mode writes must honour the writable bit. No page is currently marked read-only, so WP only wires up the semantics; it does not yet intercept any write.
-- This is not full W^X: code and data still share page 0. True code RX / data RW+NX requires a 4 KiB table rebuild, out of scope for this phase.
+- EFER.NXE is set. **The first 2 MiB page has been split into 4 KiB pages**: `.text` = R|X, `.rodata` = R, `.data`/`.bss`/stack = R|W, and every other address is unmapped (an access faults). All 511 2 MiB pages above it carry NX.
+- CR0.WP is set: even kernel-mode writes must honour the writable bit. `.text` and `.rodata` are now genuinely read-only, so WP **really intercepts** (a write to `.text` gives #PF `0x03` at CR2=0x101000).
+- **Full W^X now holds**: no page is ever writable and executable at once. Evidence: a write to `.text` is refused (error=0x03) and an instruction fetch from `.data` is refused (error=0x11), and normal execution resumes after both.
 
 #### riscv64 (currently installed)
 ```text
@@ -248,7 +248,7 @@ The current tests run in QEMU with a fixed workload and do not include a real co
 | Long-duration run (1,000 ticks, exact accounting) | Pass | E1 + E2 |
 | Interrupt storm (8 kHz burst, then recovery) | Pass (criterion proven falsifiable with a mutant) | E1 + E2 |
 | Page-level permissions (real violating access on both architectures) | Pass (x86_64 0x03/0x11, riscv64 15/12) | E1 + E2 |
-| Full W^X | **Fail**: x86_64 is limited by 2 MiB granularity | E1 |
+| Full W^X (no page both writable and executable) | **Pass**: proven by real violating accesses on both architectures | E1 + E2 |
 | User mode and upper-brain sandbox | **Fail, no sandbox and no authority model** | E3 |
 | Multi-core concurrency | **Unsupported**, explicitly declared and gated | E2 |
 | Release metadata completeness | **Incomplete**: still needs the real repository owner and security contact | E3 |

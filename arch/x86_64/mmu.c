@@ -67,6 +67,36 @@ static void write_msr(u32 msr, u64 v)
 /* 页目录本身：恒等映射的 0x72000 */
 static volatile u64 *const pd = (volatile u64 *)(uintptr_t)0x72000ULL;
 
+/*
+ * 4 KiB 页表重建用的新页表，放在 0x73000（紧接 PD，仍在低 1 MiB 内）。
+ *
+ * 引导阶段的 2 MiB 大页是唯一可用粒度，于是代码与数据被迫同页，
+ * NX 只能整块打开。这里把第 0 个大页拆成 512 个 4 KiB 页，按段赋权：
+ *   .text        R|X（可执行、不可写）
+ *   .rodata      R  （可读、不可写、不可执行）
+ *   .data/.bss/栈 R|W（可写、不可执行）
+ *   低 1 MiB     R|W（页表自身与 PVH 引导信息住在这里）
+ *   其余        不存在（访问即 #PF）
+ * 这才是完整 W^X：同一页永不同时可写又可执行。
+ */
+#define PT_FIRST_PHYS 0x73000ULL
+static volatile u64 *const pt_first =
+        (volatile u64 *)(uintptr_t)PT_FIRST_PHYS;
+
+/* PTE 标志 */
+#define PTE_P    0x001ULL
+#define PTE_RW   0x002ULL
+#define PTE_NX   (1ULL << 63)
+
+extern char __text_start[], __text_end[];
+extern char __rodata_start[], __rodata_end[];
+extern char __data_start[], __data_end[];
+
+static u64 paddr_of(const char *p)
+{
+        return (u64)(uintptr_t)p;
+}
+
 static void reload_cr3(void)
 {
         u64 cr3;
@@ -165,6 +195,65 @@ void arch_mmu_set_entry(u32 page_2mib, u64 entry)
 {
         pd[page_2mib] = entry;
         reload_cr3();
+}
+
+/*
+ * 把第 0 个 2 MiB 大页拆成 4 KiB 页，实现完整 W^X。
+ *
+ * 返回值是实际建立的页数（不含「不存在」的页）。
+ * 调用前必须先打开 EFER.NXE，否则 PTE 的 NX 位是保留位，置位即 #PF。
+ */
+u32 arch_mmu_split_kernel(void)
+{
+        const u64 text_lo   = paddr_of(__text_start);
+        const u64 text_hi   = paddr_of(__text_end);
+        const u64 rodata_lo = paddr_of(__rodata_start);
+        const u64 rodata_hi = paddr_of(__rodata_end);
+        const u64 data_lo   = paddr_of(__data_start);
+        const u64 data_hi   = paddr_of(__data_end);
+        u32 mapped = 0;
+
+        for (u32 i = 0; i < 512; i++) {
+                u64 addr = (u64)i * 0x1000ULL;
+                u64 flags = 0;
+
+                if (addr < 0x100000ULL) {
+                        /* 页表自身、PVH 引导信息与 32 位引导栈都住在这里 */
+                        flags = PTE_P | PTE_RW | PTE_NX;
+                } else if (addr >= text_lo && addr < text_hi) {
+                        flags = PTE_P;                  /* R|X：可执行不可写 */
+                } else if (addr >= rodata_lo && addr < rodata_hi) {
+                        flags = PTE_P | PTE_NX;         /* R：只读不可执行 */
+                } else if (addr >= data_lo && addr < data_hi) {
+                        flags = PTE_P | PTE_RW | PTE_NX; /* R|W：可写不可执行 */
+                }
+
+                if (flags != 0) {
+                        pt_first[i] = (addr & ~0xFFFULL) | flags;
+                        mapped++;
+                } else {
+                        pt_first[i] = 0;                /* 不存在 */
+                }
+        }
+
+        /*
+         * 把 PDE[0] 从 2 MiB 大页换成指向新页表的指针。
+         *
+         * PDE 的 RW 位管辖整棵子树：这里必须置 1，否则下级所有页一律
+         * 只读。真正的写权限由每个 PTE 的 RW 位决定。
+         */
+        pd[0] = (PT_FIRST_PHYS & ~0xFFFULL) | PTE_P | PTE_RW;
+        reload_cr3();
+
+        return mapped;
+}
+
+/* 取第 0 个 4 KiB 页表项（自检用） */
+u64 arch_mmu_pte(u32 page_4kib)
+{
+        if (page_4kib >= 512)
+                return 0;
+        return pt_first[page_4kib];
 }
 
 /* 直接把 CR0.WP 置位或清零，用于证明「位 + 权限」缺一不可 */
