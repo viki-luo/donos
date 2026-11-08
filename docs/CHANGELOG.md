@@ -566,13 +566,15 @@
 - **安全、可靠性与性能评估**：新增目标内核基准与压力测试，覆盖合法/拒绝路径、
   1 层与 8 层参照链、全部可用槽位的最坏推进、表满故障关闭、伪造句柄拒绝和
   20,000 次插拔循环；新增 `tools/bench.sh` 与中英文评估报告。QEMU 实测最坏推进
-  约占一个 100 Hz 节拍的 1% 至 2%
+  约占一个 100 Hz 节拍的 1% 至 2%（**该数字已被后续尾延迟门禁取代**：
+  同一负载现按 p99.9 / 最大值报告，见本文上方「可重复的尾延迟门禁」）
   / **Security, reliability, and performance assessment**: new in-kernel benchmarks
   and stress tests cover accepted/rejected paths, one- and eight-object frame chains,
   a worst pass over every available slot, fail-closed capacity exhaustion, forged
   handles, and 20,000 plug/unplug cycles. `tools/bench.sh` and bilingual assessment
   reports reproduce the results; the measured worst pass consumes about 1% to 2% of
-  a 100 Hz tick under QEMU
+  a 100 Hz tick under QEMU (**superseded by the tail-latency gate below**: the same
+  workload is now reported as p99.9 / maximum)
 - **保护状态自报**：x86_64 打印 CR0/CR4/CR3 与页目录权限；riscv64 打印 satp。
   当前证据明确显示 x86_64 为可写可执行恒等映射且 `CR0.WP=0`，riscv64 为 Bare
   模式，因此尚无生产级内存或上层大脑隔离

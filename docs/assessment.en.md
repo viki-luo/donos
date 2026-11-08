@@ -15,8 +15,8 @@ What the evidence supports:
 - Generation counters advance through 20,000 plug/unplug cycles and the earliest handle remains dead.
 - Capacity exhaustion returns `WIRE_NONE` without damaging existing wires.
 - Dead handles and six forged-handle shapes are rejected.
-- With every available object slot filled and reference chains up to eight objects deep, one complete execution pass consumes about 1% to 2% of a 100 Hz tick period.
-- There is no user mode, upper-brain sandbox, or authority model. x86_64 enforces the available large-page NX/WP subset and riscv64 enforces page-level W^X, but neither provides a user-mode brain sandbox. The prototype must not be described as production-secure.
+- With every available slot filled and chains up to eight objects deep, both p99.9 and the maximum of a complete pass stay below 10% of a 100 Hz tick (QEMU icount baseline). **E1 + E2**
+- There is no user mode, no upper-brain sandbox and no authority model; x86_64 reaches only a partial W^X at 2 MiB granularity while riscv64 reaches page-level W^X. The prototype must not be described as production-secure. **E1** (checked against `mmu failures = 0` and the self-reported lines)
 
 ## 2. Scope and method
 
@@ -63,43 +63,58 @@ tools/bench.sh
 
 ## 3. Final measurement results
 
+**Evidence grades**: every conclusion in this document carries its source, so that an argument is never presented as a measurement.
+
+| Grade | Meaning |
+|---|---|
+| **E1** | Measured on this machine with a reviewable log (the corresponding `make check` / `tools/bench.sh` line) |
+| **E2** | Enforced by an automated gate that turns red when broken (including gates verified with mutants) |
+| **E3** | Argument or code-structure statement only; not measured |
+
 The following values are from one complete dual-architecture run. Absolute virtual-machine counts vary; the ratios are more meaningful.
 
 | Metric | x86_64 | riscv64 |
 |---|---:|---:|
 | Free object slots entering benchmark | 58 | 62 |
-| Accepted `base_apply` | 482.48 TSC counts/call | 1.80 time counts/call |
-| Rejected `base_apply` | 101.17 TSC counts/call | 0.96 time counts/call |
-| One-object frame resolution | 437.89 TSC counts/call | 1.19 time counts/call |
-| Eight-object frame resolution | 6666.44 TSC counts/call | 29.24 time counts/call |
-| Worst complete execution pass | 351222 TSC counts | 1410 time counts |
-| One 100 Hz tick period | 28108316 TSC counts | 89634 time counts |
-| Worst pass share of tick | **1.24%** | **1.57%** |
+| Accepted `base_apply` | 137.00 TSC counts/call | 1.01 time counts/call |
+| Rejected `base_apply` | 25.00 TSC counts/call | 0.24 time counts/call |
+| One-object frame resolution | 101.00 TSC counts/call | 0.86 time counts/call |
+| Eight-object frame resolution | 15,924.09 TSC counts/call | 133.78 time counts/call |
+| One 100 Hz tick period | 8,367,199 TSC counts | 90,560 time counts |
+| Full-table pass p99.9 share of tick | **8.95%** | **7.66%** |
+| Full-table pass maximum share of tick | **8.95%** | **7.66%** |
 | Hot-plug churn | 20,000 | 20,000 |
 | Benchmark failures | 0 | 0 |
+
+All of the above are **E1 + E2** (`make bench-latency` and `make check` check them).
 
 x86_64 has 58 free slots because PCI discovery keeps six devices online. The riscv64 test configuration has 62 free slots because two PCI devices remain online. This is not a leak. The self-test previously retained `brain2`, `hand`, and `foot`; those objects are now released when the test finishes.
 
 ### Performance interpretation
 
-- Accepted `base_apply` is more expensive than rejection because the accepted path locates the target object and submits the event. Rejection exits during handle validation.
-- Eight-object reference resolution is substantially more expensive than one-object resolution, as expected from per-level quaternion rotation and accumulation.
-- Even with every available slot filled and objects placed on the deepest tested chains, one complete pass consumes only about 1% to 2% of a 10 ms tick.
-- This establishes strong headroom for the current 100 Hz prototype workload. It does not establish equivalent results on real silicon, at higher control rates, with more objects, under SMP, or under production traffic.
+- Accepted `base_apply` is more expensive than rejection because the accepted path locates the target object and submits the event. Rejection exits during handle validation. **E1**
+- Eight-object reference resolution is substantially more expensive than one-object resolution, as expected from per-level quaternion rotation and accumulation. **E1**
+- Even with every available slot filled and objects placed on the deepest tested chains, the p99.9 and maximum of one complete pass stay below 10% of a 10 ms tick. **E1 + E2**
+- Those numbers come from a deterministic QEMU `-icount` baseline; they are **not** chip nanoseconds or a WCET proof. Real hardware must re-run the same quantiles. **E3 (not done)**
+
 
 ## 4. Security assessment
 
 ### 4.1 Verified security properties
 
 | Property | Result | Evidence |
-|---|---|---|
-| Fail-closed capacity exhaustion | Pass | Additional arrival returns `WIRE_NONE` |
-| Existing wires survive a full table | Pass | Every held wire still accepts a motion event |
-| Dead handles do not resurrect | Pass | Reuse changes the generation and the old handle stays invalid |
-| Forged handles are rejected | Pass | Six malformed and boundary shapes are rejected |
-| Frame-cycle detection | Pass on object side | The base cannot see chains; `object_resolve` rejects the cycle |
-| Broken frame rejection | Pass | Resolution fails after the frame object departs |
-| Benchmark cleanup | Pass | Temporary objects are released after each section |
+|---|---|---|---|
+| Fail-closed capacity exhaustion | Pass | Additional arrival returns `WIRE_NONE` | E1 + E2 |
+| Existing wires survive a full table | Pass | Every held wire still accepts a motion event | E1 + E2 |
+| Dead handles do not resurrect | Pass | Reuse changes the generation and the old handle stays invalid | E1 + E2 (incl. generation white-box test) |
+| Forged handles are rejected | Pass | Six malformed and boundary shapes are rejected | E1 + E2 |
+| Frame-cycle detection | Pass on object side | The base cannot see chains; `object_resolve` rejects the cycle | E1 + E2 |
+| Broken frame rejection | Pass | Resolution fails after the frame object departs | E1 + E2 |
+| Benchmark cleanup | Pass | Temporary objects are released after each section | E1 + E2 |
+| Write to a read-only page is refused by hardware | Pass | x86_64 #PF error=0x03; riscv64 scause=15, with exact fault address and faulting PC | E1 + E2 |
+| Instruction fetch from a non-executable page is refused | Pass | x86_64 #PF error=0x11; riscv64 scause=12 | E1 + E2 |
+| Normal execution resumes after an expected fault | Pass | Ordinary RX code runs after both probes | E1 + E2 |
+| Objects stay inside the declared travel interval | Pass | The limited axis stops exactly at +4 m and refuses the following steps | E1 + E2 |
 
 ### 4.2 Confirmed security gaps
 
@@ -223,16 +238,23 @@ The current tests run in QEMU with a fixed workload and do not include a real co
 
 ## 9. Final verdict
 
-| Dimension | Verdict |
-|---|---|
-| Core-model feasibility | **Supported by the current prototype** |
-| Cross-architecture consistency | **Pass** |
-| Handle and capacity reliability | **Pass under current stress tests** |
-| 100 Hz prototype performance | **Substantial headroom** |
-| Production memory security | **Fail, isolation not implemented** |
-| Isolation of a faulty or malicious brain | **Fail, no sandbox or authority model** |
-| SMP and long-duration reliability | **Not yet verified** |
+| Dimension | Verdict | Evidence grade |
+|---|---|---|
+| Core-model feasibility | Supported by the current prototype | E1 + E2 |
+| Cross-architecture consistency | Pass (one `base/`, one gate suite) | E2 |
+| Handle and capacity reliability | Pass under stress and generation white-box tests | E1 + E2 |
+| 100 Hz prototype performance (function-level tail) | Budgets met: p99.9 / max about 8.95% (x86_64), 7.66% (riscv64) | E1 + E2 |
+| Real-hardware real-time behaviour (WCET, end-to-end latency) | **Not verified** | E3 |
+| Long-duration run (1,000 ticks, exact accounting) | Pass | E1 + E2 |
+| Interrupt storm (8 kHz burst, then recovery) | Pass (criterion proven falsifiable with a mutant) | E1 + E2 |
+| Page-level permissions (real violating access on both architectures) | Pass (x86_64 0x03/0x11, riscv64 15/12) | E1 + E2 |
+| Full W^X | **Fail**: x86_64 is limited by 2 MiB granularity | E1 |
+| User mode and upper-brain sandbox | **Fail, no sandbox and no authority model** | E3 |
+| Multi-core concurrency | **Unsupported**, explicitly declared and gated | E2 |
+| Release metadata completeness | **Incomplete**: still needs the real repository owner and security contact | E3 |
 
 The accurate final statement is:
 
-> liteOS has moved from a concept to an executable, measurable, and reproducible dual-architecture prototype. Its motion-control model, handle boundaries, and performance at the current scale have supporting evidence. Security isolation remains the next major engineering phase, not a property the prototype already possesses.
+> liteOS has moved from a concept to an executable, measurable, and reproducible dual-architecture prototype. Its motion-control model, handle boundaries, function-level tail latency, long-duration behaviour and interrupt-storm recovery all have reproducible measurements or gate evidence, and page-level permissions have been confirmed by real violating accesses on both architectures. **Security isolation, user mode, a brain sandbox, multi-core concurrency and real-hardware real-time behaviour are still absent** — they are not properties the prototype already possesses.
+
+**No row in this table may claim "pass" without an evidence grade**; any new conclusion must state its source grade, or it is a documentation defect.

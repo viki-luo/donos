@@ -117,10 +117,12 @@ tools/bench.sh
 make check
 ```
 
-评估结论必须同时阅读性能数字与安全限制：当前最坏推进约占 100 Hz
-节拍的 1% 至 2%，但尚无用户态、W^X、NX 强制隔离或上层大脑沙箱。
-详见 [中文评估](docs/assessment.md) / [English assessment](docs/assessment.en.md)
-与 [SECURITY.md](SECURITY.md)。
+评估结论必须同时阅读性能数字与安全限制：满表推进的 p99.9 与最大值约占
+100 Hz 节拍的 8.95%（x86_64）/ 7.66%（riscv64），这是 QEMU 确定性指令
+计数基线（`-icount`），不是芯片纳秒或 WCET 证明；且尚无用户态、
+x86_64 完整 W^X 或上层大脑沙箱。**每条结论都标注证据等级（E1 实测 /
+E2 门禁 / E3 仅论证）**，详见 [中文评估](docs/assessment.md) /
+[English assessment](docs/assessment.en.md) 与 [SECURITY.md](SECURITY.md)。
 
 *Toolchain check: `tools/check-toolchain.sh`. Boot details (PVH, the
 32→64 transition): [docs/boot.en.md](docs/boot.en.md). To verify the
