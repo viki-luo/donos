@@ -14,15 +14,32 @@
  *      divisor becomes __udivdi3 and fails at link time.
  */
 #include "base.h"
+#include "fixed.h"
+#include "monitor.h"
 #include "object.h"
 #include "report.h"
 #include "bench.h"
 
-#define APPLY_N      200000u
-#define RESOLVE_N     50000u
+#define APPLY_N     200000u
+#define RESOLVE_N    50000u
 #define TICK_N         2000u
 #define CHURN_N       20000u
 #define LATENCY_HIST_BINS 64u
+
+/* 长期运行与中断风暴的规模与期望值来源（额定节拍见 report.h）。 */
+#define ENDURANCE_TICKS   1000u
+#define ENDURANCE_STEP_NS (1000000000ULL / ARCH_TICK_HZ)
+#define STORM_HZ          8000u
+#define STORM_TICKS        500u
+/*
+ * 风暴突发允许耗掉「多少个额定节拍当量」的计数。
+ * 8000 Hz 的理论值是 500/80 = 6.25；给到 50 仍是额定频率下 500 的 1/10，
+ * 因此这条阈值不会把「频率没升」误判为通过。
+ */
+#define STORM_NOMINAL_EQUIV 50u
+
+/* Q32.32 的整数量：BQ(3) = 3.0。 */
+#define BQ(x) ((motion_fixed_t)(x) << 32)
 
 /*
  * 100 Hz 满表推进的验收预算。
@@ -224,10 +241,12 @@ static void bench_apply(void)
         wire_t w = plug_tracked(2, 0);          /* no period: not scheduled */
         motion_event_t ev = make_event(w, FRAME_WORLD, 1000000000ULL, 3, 1);
 
+        arch_irq_disable();
         u64 t0 = arch_cycles();
         for (u32 i = 0; i < APPLY_N; i++)
                 base_apply(clk, &ev);
         u64 accepted = arch_cycles() - t0;
+        arch_irq_enable();
 
         /* Rejection path: the target wire does not exist. */
         motion_event_t bad = make_event(0xDEADBEEFULL, FRAME_WORLD,
@@ -605,6 +624,249 @@ static void bench_stress(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* 5. Endurance: 1000 scheduled ticks under continuous monitoring       */
+/* ------------------------------------------------------------------ */
+
+/*
+ * 长期运行不是「跑得久」，而是「跑得久之后账还对得上」。1000 拍
+ * = 10 s 执行层时间；每条期望都从余数进位的精确模型手算：
+ *
+ *   位置 = V·P·N / 1e9（Q32.32），当 V·P·N 是 1e9 的整数倍时精确成立，
+ *   没有任何累计舍入。本节的三个速度都刻意选成这种情况：
+ *
+ *   run   : 3 m/s × 10 s  = 30 m（精确）—— 账必须分毫不差
+ *   limit : 1 m/s，行程 [-1 m, +4 m] —— 第 400 拍精确停在 4 m，
+ *           其后 600 拍整步拒绝；被拒的步仍计入执行
+ *   spin  : 1 rad/s × 10 s，姿态每拍归一化 —— 归一化若有漂移，
+ *           1000 步后 |q|² 一定离开 1
+ *
+ * 监视处置与长期运行同时进行：1000 次轮询，第 300 拍拔掉一条被关注的
+ * 接线。故障必须恰好报一次（世代注销），其余轮询必须安静，
+ * 幸存者必须一直被注视到最后一拍。
+ */
+
+static u32 ev_lost, ev_drift, ev_resolve, ev_rate, ev_clock;
+
+static void endurance_sink(monitor_event_t ev, wire_t w)
+{
+        (void)w;
+
+        switch (ev) {
+        case MON_OK:           break;      /* 不是事件 */
+        case MON_E_WIRE_LOST:  ev_lost++;    break;
+        case MON_E_DRIFT:      ev_drift++;   break;
+        case MON_E_RESOLVE:    ev_resolve++; break;
+        case MON_E_RATE:       ev_rate++;    break;
+        case MON_E_CLOCK:      ev_clock++;   break;
+        }
+}
+
+static void bench_endurance(void)
+{
+        arch_puts("\n=== endurance: ");
+        arch_putdec(ENDURANCE_TICKS);
+        arch_puts(" scheduled ticks, monitored ===\n\n");
+
+        wire_t run_obj   = plug_tracked(1, ENDURANCE_STEP_NS);
+        wire_t spin_obj  = plug_tracked(1, ENDURANCE_STEP_NS);
+        wire_t limit_obj = plug_tracked(1, ENDURANCE_STEP_NS);
+        wire_t victim    = plug_tracked(1, ENDURANCE_STEP_NS);
+        wire_t survivor  = plug_tracked(1, ENDURANCE_STEP_NS);
+
+        if (survivor == WIRE_NONE) {
+                check("endurance: five objects plugged", false);
+                return;
+        }
+
+        motion_event_t ev = make_event(run_obj, FRAME_WORLD, 0, 1, BQ(3));
+        check("endurance: the 3 m/s command is accepted",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        ev = make_event(limit_obj, FRAME_WORLD, 0, 1, BQ(1));
+        check("endurance: the 1 m/s command is accepted",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        ev = make_event(victim, FRAME_WORLD, 0, 1, BQ(1));
+        base_apply(clk, &ev);
+        ev = make_event(survivor, FRAME_WORLD, 0, 1, BQ(1));
+        base_apply(clk, &ev);
+
+        ev = make_event(spin_obj, FRAME_WORLD, 0, 6, 0);
+        ev.motion[5] = BQ(1);                 /* 角速度 z = 1 rad/s */
+        check("endurance: the 1 rad/s spin is accepted",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        object_capability_t cap;
+        for (u8 i = 0; i < MOTION_DOF_MAX; i++) {
+                cap.limit_min[i] = 0;
+                cap.limit_max[i] = 0;
+                cap.max_rate[i] = 0;
+        }
+        cap.dof = 1;
+        cap.mass = BQ(1);
+        cap.limit_min[0] = -BQ(1);
+        cap.limit_max[0] = BQ(4);
+        cap.max_rate[0] = BQ(2);
+        check("endurance: the travel limit is declared",
+              object_describe(limit_obj, &cap));
+
+        ev_lost = ev_drift = ev_resolve = ev_rate = ev_clock = 0;
+        monitor_init(endurance_sink);
+        check("endurance: the monitor watches the victim", monitor_watch(victim));
+        check("endurance: the monitor watches the survivor",
+              monitor_watch(survivor));
+
+        /* 首次只排期：先空跑一次，让五条线全部进入调度。 */
+        u64 t = object_now_ns();
+        u32 stepped = 0;
+        object_run(t, &stepped);
+
+        u32 total_steps = 0;
+        for (u32 k = 0; k < ENDURANCE_TICKS; k++) {
+                t += ENDURANCE_STEP_NS;
+                object_run_status_t rs = object_run(t, &stepped);
+                total_steps += stepped;
+
+                if (k == 300u)
+                        object_unplug(victim);   /* 故意不调用 monitor_forget */
+
+                monitor_poll(rs);
+        }
+
+        arch_puts("  endurance ticks = ");
+        arch_putdec(ENDURANCE_TICKS);
+        arch_puts(", steps = ");
+        arch_putdec(total_steps);
+        arch_puts("\n");
+
+        check("endurance: the execution clock advanced exactly 10 s",
+              object_now_ns() == t);
+        check("endurance: every scheduled step executed",
+              total_steps ==
+              4u * ENDURANCE_TICKS + 301u); /* victim takes its last
+                                               step in the same call that
+                                               precedes its unplug */
+
+        object_state_t st;
+        check("endurance: 3 m/s for 10 s lands exactly on 30 m",
+              object_state(run_obj, &st) && st.position[0] == BQ(30));
+        check("endurance: the limited axis holds exactly at +4 m",
+              object_state(limit_obj, &st) && st.position[0] == BQ(4));
+        check("endurance: refused steps still count as executed",
+              object_step_count(limit_obj) == ENDURANCE_TICKS);
+        check("endurance: the spin never translates",
+              object_state(spin_obj, &st) && st.position[0] == 0 &&
+              st.position[1] == 0 && st.position[2] == 0);
+
+        /* |q|² 仍须落在 1 ± 1/512：归一化若有漂移，1000 步后一定可见。 */
+        bool unit = object_state(spin_obj, &st);
+        motion_fixed_t sum = 0;
+        for (u8 i = 0; i < 4 && unit; i++) {
+                motion_fixed_t sq;
+
+                unit = fixed_mul_checked(st.orientation[i], st.orientation[i],
+                                         &sq) == FIXED_OK &&
+                       fixed_add_checked(sum, sq, &sum) == FIXED_OK;
+        }
+        motion_fixed_t dev = 0;
+        if (unit)
+                unit = fixed_sub_checked(sum, (motion_fixed_t)1 << 32, &dev)
+                       == FIXED_OK;
+        if (unit && dev < 0)
+                dev = -dev;
+        check("endurance: the pose is still a unit quaternion after 1000 steps",
+              unit && dev <= ((motion_fixed_t)1 << 32) / 512);
+        check("endurance: the spin stayed about z only",
+              object_state(spin_obj, &st) && st.orientation[1] == 0 &&
+              st.orientation[2] == 0);
+
+        monitor_stats_t ms = monitor_poll(OBJECT_RUN_OK);
+        check("endurance: the departed wire was reported exactly once",
+              ev_lost == 1u);
+        check("endurance: no drift, resolve, rate or clock fault in 1000 polls",
+              ev_drift == 0u && ev_resolve == 0u && ev_rate == 0u &&
+              ev_clock == 0u);
+        check("endurance: the monitor still watches the survivor to the end",
+              ms.watched == 1u && ms.alive == 1u);
+
+        monitor_forget(survivor);
+}
+
+/* ------------------------------------------------------------------ */
+/* 6. Interrupt storm: an 8 kHz burst, then the nominal rate back       */
+/* ------------------------------------------------------------------ */
+
+/*
+ * 风暴判据不是「收到很多中断」，而是三件可观察的事：
+ *   1. 突发在有限的轮询次数内完成 —— 若频率仍是额定 100 Hz，500 拍
+ *      要 5 s 虚拟时间，自旋次数会远远越出预算；这条把「真的升频了」
+ *      变成可证伪的断言。
+ *   2. 风暴结束后节拍继续前进 —— 没有因丢 EOI 或漏重装而停摆。
+ *   3. 每拍周期数回到额定水平 —— 真的恢复了，而不是停在风暴频率。
+ * 全部用同一计数器同一次运行内的比值判定，跨架构可比。
+ */
+
+static void bench_storm(void)
+{
+        arch_puts("\n=== interrupt storm: ");
+        arch_putdec(STORM_HZ);
+        arch_puts(" Hz burst, then nominal restore ===\n\n");
+
+        u64 t0 = arch_ticks();
+        u64 c0 = arch_cycles();
+        while (arch_ticks() - t0 < 5u)
+                ;
+        u64 base_per_tick = (arch_cycles() - c0) / 5u;
+
+        /*
+         * 升频证据用「突发实际耗掉的计数」与「额定节拍宽度」相比。
+         *
+         * 若频率真的到 8000 Hz，500 拍只需 500/8000 秒，即额定 100 Hz 下
+         * 500 拍耗时的 1/80。给足 8 倍余量（50 个额定节拍的当量），
+         * 仍与「频率根本没变」（500 个额定节拍当量）相差 10 倍 ——
+         * 这条判据无法被「中断只是变多」蒙混过去。
+         */
+        u64 s0 = arch_ticks();
+        u64 sc0 = arch_cycles();
+        arch_timer_hz(STORM_HZ);
+        u64 spins = 0;
+        while (arch_ticks() - s0 < STORM_TICKS)
+                spins++;
+        u64 storm_ticks = arch_ticks() - s0;
+        u64 storm_cycles = arch_cycles() - sc0;
+        arch_timer_hz(ARCH_TICK_HZ);
+
+        arch_puts("  storm ticks = ");
+        arch_putdec(storm_ticks);
+        arch_puts(", spin iterations = ");
+        arch_putdec(spins);
+        arch_puts("\n");
+
+        check("storm: the burst delivered its full tick count",
+              storm_ticks >= STORM_TICKS);
+        check("storm: the burst really ran far faster than the nominal rate",
+              base_per_tick != 0u &&
+              storm_cycles < base_per_tick * STORM_NOMINAL_EQUIV);
+
+        u64 r0 = arch_ticks();
+        u64 c1 = arch_cycles();
+        while (arch_ticks() - r0 < 5u)
+                ;
+        u64 after_per_tick = (arch_cycles() - c1) / 5u;
+
+        check("storm: the nominal tick rate is restored",
+              after_per_tick >= base_per_tick / 4u &&
+              after_per_tick <= base_per_tick * 4u + 4u);
+        check("storm: ticks keep advancing after the burst",
+              arch_ticks() > r0);
+
+        u32 stepped = 0;
+        check("storm: the execution layer still advances afterwards",
+              object_run(object_now_ns() + ENDURANCE_STEP_NS, &stepped) ==
+              OBJECT_RUN_OK);
+}
+
+/* ------------------------------------------------------------------ */
 
 int bench_run(void)
 {
@@ -652,6 +914,8 @@ int bench_run(void)
                                  LATENCY_MAX_BUDGET_PERMILLE);
         }
 
+        bench_endurance();
+        bench_storm();
         bench_stress();
 
         arch_puts("\n  bench failures = ");

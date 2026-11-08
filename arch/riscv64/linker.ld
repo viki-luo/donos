@@ -31,17 +31,31 @@ SECTIONS
                 . = ALIGN(4K);
                 __rodata_end = .;
                 __data_start = .;
-                __bss_start = .;
         }
 
         .data : ALIGN(4K) {
+                /*
+                 * 初值区与清零区必须分开标记。
+                 *
+                 * 此前 `__bss_start` 定义在 `.data` 的最开头（甚至定义在
+                 * .rodata 里），而 `.bss` 又并进了同一个输出段 —— boot.S
+                 * 的清零循环于是把**整个 .data 的初值全部抹掉**。
+                 * 任何带非零静态初值的全局变量在 riscv64 上都会读到 0，
+                 * 而这类 bug 只在「第一次真的有非零初值」时才现形：
+                 * 计时器节拍宽度被清零后，中断变成永不过期，
+                 * 表现为节拍数暴涨到百万级、主循环被彻底饿死。
+                 */
                 *(.data .data.* .sdata .sdata.*)
+                . = ALIGN(16);
+                __data_init_end = .;
+
+                __bss_start = .;
                 *(.sbss .sbss.*)
                 *(.bss .bss.*)
                 *(COMMON)
                 . = ALIGN(8);
-                __data_end = .;
                 __bss_end = .;
+                __data_end = .;
                 __stack_bottom = .;
         }
 

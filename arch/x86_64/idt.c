@@ -132,6 +132,12 @@ u64 arch_ticks(void)
         return tick_count;
 }
 
+/* 中断风暴测试：直接重编 PIT；额定频率恢复也走同一条路。 */
+void arch_timer_hz(u32 hz)
+{
+        arch_pit_init(hz);
+}
+
 void arch_irq_enable(void)
 {
         __asm__ volatile("sti");

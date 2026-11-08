@@ -32,6 +32,18 @@ u64 arch_cycles(void);
 u64 arch_ticks(void);
 
 /*
+ * 额定节拍频率：两架构一致（10 ms 一拍）。
+ * 长期运行与中断风暴的期望值都从它推导，不从架构头文件引入。
+ */
+#define ARCH_TICK_HZ 100u
+
+/*
+ * 中断风暴测试原语：临时把节拍中断改到 hz。
+ * 恢复额定频率用 arch_timer_hz(ARCH_TICK_HZ)。
+ */
+void arch_timer_hz(u32 hz);
+
+/*
  * 基准测量临界区：只用于隔离 object_run 自身的执行延迟，避免异步
  * 定时器中断混入函数级分位数。禁用时间必须短，测量结束后立即恢复。
  */

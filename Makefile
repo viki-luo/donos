@@ -189,6 +189,11 @@ check:
 		fi; \
 		grep -qE '^  failures = 0$$' $$log || { echo "$$arch 自检失败"; grep -E '^  (FAIL|failures)' $$log; exit 1; }; \
 		grep -qE '^  bench failures = 0$$' $$log || { echo "$$arch 压力测试失败"; grep -E 'bench failures' $$log; exit 1; }; \
+		grep -q '^  endurance ticks = ' $$log || { echo "$$arch 缺少长期运行证据"; exit 1; }; \
+		grep -q '^  storm ticks = ' $$log || { echo "$$arch 缺少中断风暴证据"; exit 1; }; \
+		if [ "$$arch" = riscv64 ]; then \
+			grep -q '^  ok   \.data initializer survived boot$$' $$log || { echo "riscv64 静态初值在引导清零中丢失"; exit 1; }; \
+		fi; \
 		grep -qE '^  monitor failures = 0$$' $$log || { echo "$$arch 监视器自检失败"; grep -E 'monitor failures' $$log; exit 1; }; \
 		grep -qE '^  brain failures = 0$$' $$log || { echo "$$arch 大脑热切换自检失败"; grep -E 'brain failures' $$log; exit 1; }; \
 		grep -qE '^  mmu failures = 0$$' $$log || { echo "$$arch MMU 自检失败"; grep -E 'mmu failures' $$log; exit 1; }; \

@@ -54,7 +54,7 @@ run_x86_64() {
                 -serial file:build/bench-x86_64.log \
                 -display none -no-reboot -no-shutdown
         tr -d '\r' < build/bench-x86_64.log | grep -E \
-                'free object|ticks/call|latency (average|p50|p99 |p99.9|max)|histogram|bucket|tick period|run share|latency budget|capacity =|churn cycles|bench failures|failures ='
+                'free object|ticks/call|latency (average|p50|p99 |p99.9|max)|histogram|bucket|tick period|run share|latency budget|capacity =|churn cycles|bench failures|failures =|endurance ticks|storm ticks'
 }
 
 run_riscv64() {
@@ -68,7 +68,7 @@ run_riscv64() {
                 -serial file:build/bench-riscv64.log \
                 -display none -no-reboot
         tr -d '\r' < build/bench-riscv64.log | grep -E \
-                'free object|ticks/call|latency (average|p50|p99 |p99.9|max)|histogram|bucket|tick period|run share|latency budget|capacity =|churn cycles|bench failures|failures ='
+                'free object|ticks/call|latency (average|p50|p99 |p99.9|max)|histogram|bucket|tick period|run share|latency budget|capacity =|churn cycles|bench failures|failures =|endurance ticks|storm ticks'
 }
 
 for a in $ARCHES; do
