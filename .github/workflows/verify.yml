@@ -26,7 +26,7 @@ jobs:
 
     steps:
       - name: 检出 / Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装工具链 / Install toolchain
         run: |
@@ -73,7 +73,7 @@ jobs:
           grep -q "protection: what the MMU actually enforces" serial.txt
 
       - name: 保存串口日志 / Save serial log
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: serial-${{ matrix.arch }}
