@@ -65,10 +65,13 @@ bool joint_control_step(control_loop_t *c, u64 now_ns);
 /*
  * 从姿态四元数里取出绕 z 的转角：θ = 2·atan2(qz, qw)。
  *
- * 不引入 atan2 的完整实现，而用一条在控制上够用的近似：
- * 小角度时 θ ≈ 2·qz（qw≈1）；大角度时用 qz 的符号与幅值夹住。
- * 这是**已知近似**，不是精确解 —— 需要精确角度时应改用查表或 CORDIC，
- * 届时这条注释必须一起改。
+ * atan2 用 CORDIC 向量模式实现（见 control.c 的 cordic_atan2）：
+ * 只有移位、加法与一张 16 项的 atan(2^-i) 表，没有除法调用、没有浮点。
+ * 角度残差约 3e-5 rad。
+ *
+ * 历史：早先这里用的是小角度近似 θ ≈ 2·qz，在 |θ| > 0.6 rad 时误差超过 2%，
+ * 而且代码里就写着「这是已知近似」。近似已被替换，测试里用 1.5 rad、
+ * 近 π 与负角度三条断言证明这一点 —— 那些正是近似做不到的地方。
  */
 bool joint_angle_from_orientation(const motion_fixed_t q[4],
                                   motion_fixed_t *angle_rad);

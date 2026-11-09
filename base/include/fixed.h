@@ -38,6 +38,18 @@ fixed_status_t fixed_div_checked(motion_fixed_t a, motion_fixed_t b,
                                  motion_fixed_t *out);
 
 /*
+ * Q32.32 角度常量。π 取到 32 位小数位。
+ *
+ * 放在头文件里而不是 .c 里：控制律要用 π/2，而它只包含 fixed.h。
+ * 原先放在 fixed.c 里时，宿主机测试因为先包含了 fixed.c 而通过，
+ * 真正的内核构建却会失败 —— 正是「测试里能过」掩盖的那类裂缝。
+ */
+#define FIXED_PI      ((motion_fixed_t)13493037705LL)   /* 3.1415926535 */
+#define FIXED_PI_2    ((motion_fixed_t)6746518852LL)    /* 1.5707963267 */
+#define FIXED_PI_4    ((motion_fixed_t)3373259426LL)    /* 0.7853981633 */
+#define FIXED_2PI     ((motion_fixed_t)26986075410LL)   /* 6.2831853071 */
+
+/*
  * Q32.32 正余弦：sin(x) 与 cos(x)，x 为弧度。
  *
  * 用泰勒展开加象限归约：先把角度折到 [-π/4, π/4]，再算

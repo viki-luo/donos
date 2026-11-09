@@ -137,15 +137,6 @@ fixed_status_t fixed_div_checked(motion_fixed_t a, motion_fixed_t b,
         return FIXED_OK;
 }
 
-/*
- * Q32.32 常量。π 取到 32 位小数位；这些是编译期常数，量级已知，
- * 不参与溢出检查。
- */
-#define FIXED_PI      ((motion_fixed_t)13493037705LL)   /* 3.1415926535 */
-#define FIXED_PI_2    ((motion_fixed_t)6746518852LL)    /* 1.5707963267 */
-#define FIXED_PI_4    ((motion_fixed_t)3373259426LL)    /* 0.7853981633 */
-#define FIXED_2PI     ((motion_fixed_t)26986075410LL)   /* 6.2831853071 */
-
 fixed_status_t fixed_sin_cos(motion_fixed_t radians,
                              motion_fixed_t *sin_out,
                              motion_fixed_t *cos_out)

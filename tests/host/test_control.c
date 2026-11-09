@@ -287,15 +287,46 @@ int main(void)
                 motion_fixed_t q[4] = { Q(1), 0, 0, 0 };
                 motion_fixed_t angle;
 
-                check("a zero orientation reads as zero angle",
-                      joint_angle_from_orientation(q, &angle) && angle == 0);
+                /*
+                 * CORDIC 不是精确算术：y = 0 时角度在 ±atan(2^-i) 之间收敛，
+                 * 残差约 1e-4 rad。断言恰好等于 0 会把「浮点级精度」
+                 * 当成「整数精确」，那是测试在说谎。
+                 */
+                check("a zero orientation reads as an angle within 1e-3 rad",
+                      joint_angle_from_orientation(q, &angle) &&
+                      (angle < Q(0.001) && angle > -Q(0.001)));
 
-                /* q = (cos(θ/2), 0, 0, sin(θ/2))，θ = 0.2 rad → qz ≈ 0.0998 */
+                /* 小角度：q = (cos 0.1, 0, 0, sin 0.1)，θ = 0.2 */
                 q[0] = Q(0.9950042);
                 q[3] = Q(0.0998334);
                 check("the joint angle is recovered from the quaternion",
                       joint_angle_from_orientation(q, &angle) &&
                       near_ratio(angle, Q(0.2), 20));
+
+                /*
+                 * 大角度：这是旧近似 θ ≈ 2·qz 做不到的地方。
+                 * θ = 1.5 rad 时 qz = sin(0.75) ≈ 0.6816，
+                 * 2·qz = 1.363，误差 9% —— 近似必须被换掉。
+                 */
+                q[0] = Q(0.7316888);            /* cos(0.75) */
+                q[3] = Q(0.6816388);            /* sin(0.75) */
+                check("a large joint angle is recovered exactly, not approximated",
+                      joint_angle_from_orientation(q, &angle) &&
+                      near_ratio(angle, Q(1.5), 5));
+
+                /* 接近 π：θ = 3.0 rad，q = (cos 1.5, 0, 0, sin 1.5) */
+                q[0] = Q(0.0707372);
+                q[3] = Q(0.9974950);
+                check("an angle near pi is recovered",
+                      joint_angle_from_orientation(q, &angle) &&
+                      near_ratio(angle, Q(3.0), 5));
+
+                /* 负角度：θ = -1.2 rad */
+                q[0] = Q(0.8253356);            /* cos(0.6) */
+                q[3] = Q(-0.5646425);           /* -sin(0.6) */
+                check("a negative joint angle is recovered",
+                      joint_angle_from_orientation(q, &angle) &&
+                      near_ratio(angle, Q(-1.2), 5));
         }
 
         object_detach_device(w);
