@@ -331,6 +331,14 @@ DEVICE_TEST := build/host/test_device.exe
 # 车轮适配器：轮径/减速比/编码器换算只在适配器里，物件侧仍是 m/s。
 WHEEL_TEST := build/host/test_wheel.exe
 
+# 关节适配器与串联链：一条接线一个关节，链条由参照系表达。
+JOINT_TEST := build/host/test_joint.exe
+
+$(JOINT_TEST): tests/host/test_joint.c drivers/motion/joint_adapter.c \
+               drivers/include/joint_adapter.h base/include/motion_device.h
+	@mkdir -p build/host
+	$(HOST_CC) $(HOST_CFLAGS) -Idrivers/include tests/host/test_joint.c -o $@
+
 $(WHEEL_TEST): tests/host/test_wheel.c drivers/motion/wheel_adapter.c \
                drivers/include/wheel_adapter.h base/include/motion_device.h
 	@mkdir -p build/host
@@ -371,13 +379,14 @@ fuzz: $(FUZZ_TEST)
 		echo "  确定性模糊出现失败"; exit 1; \
 	fi
 
-host-test: $(HOST_TEST) $(WIRE_TEST) $(MONITOR_TEST) $(QUAT_TEST) $(DEVICE_TEST) $(WHEEL_TEST)
+host-test: $(HOST_TEST) $(WIRE_TEST) $(MONITOR_TEST) $(QUAT_TEST) $(DEVICE_TEST) $(WHEEL_TEST) $(JOINT_TEST)
 	@$(HOST_TEST)
 	@$(WIRE_TEST)
 	@$(MONITOR_TEST)
 	@$(QUAT_TEST)
 	@$(DEVICE_TEST)
 	@$(WHEEL_TEST)
+	@$(JOINT_TEST)
 
 # MinGW 的 UBSan 运行库并非所有发行包都完整，因此使用 trap-on-error：
 # 编译器在任何 UB 点直接发出陷阱指令，不需要链接 sanitizer runtime。
@@ -413,6 +422,11 @@ sanitize:
 		tests/host/test_wheel.c \
 		-o build/host/test_wheel_ubsan.exe
 	@build/host/test_wheel_ubsan.exe
+	$(HOST_CC) $(HOST_CFLAGS) -Imonitor/include -Idrivers/include -fsanitize=undefined \
+		-fsanitize-undefined-trap-on-error \
+		tests/host/test_joint.c \
+		-o build/host/test_joint_ubsan.exe
+	@build/host/test_joint_ubsan.exe
 	$(HOST_CC) $(HOST_CFLAGS) -fsanitize=undefined \
 		-fsanitize-undefined-trap-on-error \
 		tests/host/fuzz_base.c base/quat.c \
