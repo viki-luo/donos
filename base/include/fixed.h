@@ -44,10 +44,27 @@ fixed_status_t fixed_div_checked(motion_fixed_t a, motion_fixed_t b,
  * 原先放在 fixed.c 里时，宿主机测试因为先包含了 fixed.c 而通过，
  * 真正的内核构建却会失败 —— 正是「测试里能过」掩盖的那类裂缝。
  */
+/* Q32.32 的 1.0：三角函数与归一化都要用，放在这里统一来源。 */
+#define Q_ONE         ((motion_fixed_t)4294967296LL)
+
 #define FIXED_PI      ((motion_fixed_t)13493037705LL)   /* 3.1415926535 */
 #define FIXED_PI_2    ((motion_fixed_t)6746518852LL)    /* 1.5707963267 */
 #define FIXED_PI_4    ((motion_fixed_t)3373259426LL)    /* 0.7853981633 */
 #define FIXED_2PI     ((motion_fixed_t)26986075410LL)   /* 6.2831853071 */
+
+/*
+ * Q32.32 atan2(y, x)，CORDIC 向量模式。位移、加法与一张 16 项的
+ * atan(2^-i) 表，无除法调用；残差约 3e-5 rad。
+ * x == y == 0（原点）无定义，返回 FIXED_E_INVAL。
+ */
+fixed_status_t fixed_atan2(motion_fixed_t y, motion_fixed_t x,
+                           motion_fixed_t *out);
+
+/* 整数平方根（向下取整，u64）。 */
+u64 fixed_isqrt_u64(u64 v);
+
+/* Q32.32 平方根；负数返回 FIXED_E_INVAL。 */
+fixed_status_t fixed_sqrt(motion_fixed_t v, motion_fixed_t *out);
 
 /*
  * Q32.32 正余弦：sin(x) 与 cos(x)，x 为弧度。

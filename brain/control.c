@@ -143,91 +143,6 @@ bool joint_control_init(control_loop_t *c, wire_t w, u64 period_ns,
         return true;
 }
 
-/*
- * CORDIC 向量模式的 atan 表：atan(2^-i)，Q32.32。
- *
- * 表由公式生成，不是手抄；16 项在 Q32.32 下把角度误差压到约 3e-5 rad，
- * 对关节控制足够，且全程只有移位与加减 —— 没有除法调用，没有浮点。
- */
-static const motion_fixed_t cordic_atan[16] = {
-        3373259426LL,  /* atan(2^-0 ) */
-        1991351318LL,  /* atan(2^-1 ) */
-        1052175346LL,  /* atan(2^-2 ) */
-        534100635LL,   /* atan(2^-3 ) */
-        268086748LL,   /* atan(2^-4 ) */
-        134174063LL,   /* atan(2^-5 ) */
-        67103403LL,    /* atan(2^-6 ) */
-        33553749LL,    /* atan(2^-7 ) */
-        16777131LL,    /* atan(2^-8 ) */
-        8388597LL,     /* atan(2^-9 ) */
-        4194303LL,     /* atan(2^-10) */
-        2097152LL,     /* atan(2^-11) */
-        1048576LL,     /* atan(2^-12) */
-        524288LL,      /* atan(2^-13) */
-        262144LL,      /* atan(2^-14) */
-        131072LL,      /* atan(2^-15) */
-};
-
-/* 绝对值，避免 -INT64_MIN 的边界 */
-static motion_fixed_t abs_q(motion_fixed_t v)
-{
-        return v < 0 ? -(v + 1) + 1 : v;
-}
-
-/*
- * atan2(y, x)，Q32.32 输入输出，CORDIC 向量模式。
- *
- * 把向量 (x, y) 逐步旋转到 x 轴正半轴，累加的旋转角就是 atan2。
- * x < 0 时先取反并补 π；x == 0 时直接返回 ±π/2。
- */
-static bool cordic_atan2(motion_fixed_t y, motion_fixed_t x, motion_fixed_t *out)
-{
-        motion_fixed_t angle = 0;
-        motion_fixed_t px, py;
-
-        if (out == 0)
-                return false;
-
-        if (x == 0) {
-                if (y == 0)
-                        return false;           /* 原点角度无定义 */
-                *out = y > 0 ? FIXED_PI_2 : -FIXED_PI_2;
-                return true;
-        }
-
-        /* 归到 x > 0 的半平面 */
-        if (x < 0) {
-                if (!cordic_atan2(y, -x, &angle))
-                        return false;
-                if (y >= 0)
-                        *out = angle + FIXED_PI;
-                else
-                        *out = angle - FIXED_PI;
-                return true;
-        }
-
-        px = x;
-        py = y;
-
-        for (u8 i = 0; i < 16; i++) {
-                motion_fixed_t sx = px >> i;
-                motion_fixed_t sy = py >> i;
-
-                if (py >= 0) {
-                        px += sy;
-                        py -= sx;
-                        angle += cordic_atan[i];
-                } else {
-                        px -= sy;
-                        py += sx;
-                        angle -= cordic_atan[i];
-                }
-        }
-
-        *out = angle;
-        return true;
-}
-
 bool joint_angle_from_orientation(const motion_fixed_t q[4],
                                   motion_fixed_t *angle_rad)
 {
@@ -241,13 +156,12 @@ bool joint_angle_from_orientation(const motion_fixed_t q[4],
          * 于是 θ = 2·atan2(qz, qw)。这不是近似 —— 上一步用 θ ≈ 2·qz
          * 才是近似，它在 |θ| > 0.6 rad 时误差超过 2%。
          */
-        if (!cordic_atan2(q[3], q[0], &half))
+        if (fixed_atan2(q[3], q[0], &half) != FIXED_OK)
                 return false;
         if (fixed_mul2_checked(half, &doubled) != FIXED_OK)
                 return false;
 
         *angle_rad = doubled;
-        (void)abs_q;
         return true;
 }
 

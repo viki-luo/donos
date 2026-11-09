@@ -48,4 +48,34 @@ bool leg_reachable(const leg_geometry_t *g, motion_fixed_t x, motion_fixed_t y);
 bool leg_radius_squared(motion_fixed_t x, motion_fixed_t y,
                         motion_fixed_t *out);
 
+/* ---- 逆运动学：说「足端去这里」，而不是「关节转到这个角」---- */
+
+typedef enum {
+        LEG_IK_OK = 0,
+        LEG_IK_E_UNREACHABLE = -1,      /* 目标在可达环之外：几何上无解 */
+        LEG_IK_E_INVAL = -2,            /* 参数非法或数值溢出 */
+        /*
+         * 足端恰好落在髋点：θ₁ 任意，解有无穷多个。
+         * 这既不是「无解」也不是「参数错误」——把它混进任何一个都会让
+         * 调用者做出错误判断（前者放弃，后者以为自己的输入写错了）。
+         */
+        LEG_IK_E_DEGENERATE = -3,
+} leg_ik_status_t;
+
+/*
+ * 二连杆逆解。同一个足端位置有**两个**解（膝上 / 膝下），
+ * knee_up 选择其中一个 —— 这不是实现细节，是几何事实：
+ * 只返回一个解会悄悄把一个自由度藏起来。
+ *
+ *   r² = x² + y²
+ *   cos θ₂ = (r² − l1² − l2²) / (2·l1·l2)
+ *   θ₂ = ±acos(cos θ₂)
+ *   θ₁ = atan2(y, x) − atan2(l2·sin θ₂, l1 + l2·cos θ₂)
+ *
+ * acos 用 atan2 表达：acos(c) = atan2(√(1−c²), c)。
+ */
+leg_ik_status_t leg_ik(const leg_geometry_t *g, motion_fixed_t x,
+                       motion_fixed_t y, bool knee_up,
+                       motion_fixed_t *theta1, motion_fixed_t *theta2);
+
 #endif /* DONOS_KINEMATICS_H */

@@ -402,7 +402,7 @@ bool object_capability(wire_t w, object_capability_t *out)
  * 旋转 —— 用它旋转会得到两倍长度的向量，而错误会伪装成精度问题。
  * 容差 1/1024 是给 Q32.32 存储舍入留的余量，不是给「大致归一」留的。
  */
-#define Q_ONE        4294967296LL          /* 1.0 in Q32.32 */
+/* Q_ONE 由 fixed.h 统一提供；这里不再重复定义 */
 #define Q_UNIT_TOL   (Q_ONE / 1024)
 
 static bool quaternion_is_rotation(const motion_fixed_t q[4], bool *undeclared)

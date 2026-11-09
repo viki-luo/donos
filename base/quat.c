@@ -9,7 +9,7 @@
 #include "fixed.h"
 #include "quat.h"
 
-#define Q_ONE 4294967296LL             /* 1.0 in Q32.32 */
+/* Q_ONE 现在由 fixed.h 统一提供 */
 
 /* Hamilton product a ⊗ b, component by component, every sum checked. */
 static bool q_mul(const motion_fixed_t a[4], const motion_fixed_t b[4],

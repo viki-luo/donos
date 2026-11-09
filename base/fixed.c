@@ -137,6 +137,129 @@ fixed_status_t fixed_div_checked(motion_fixed_t a, motion_fixed_t b,
         return FIXED_OK;
 }
 
+/*
+ * CORDIC 向量模式的 atan 表：atan(2^-i)，Q32.32。
+ *
+ * 表由公式生成，不是手抄；16 项在 Q32.32 下把角度误差压到约 3e-5 rad，
+ * 对关节控制足够，且全程只有移位与加减 —— 没有除法调用，没有浮点。
+ */
+static const motion_fixed_t cordic_atan[16] = {
+        3373259426LL,  /* atan(2^-0 ) */
+        1991351318LL,  /* atan(2^-1 ) */
+        1052175346LL,  /* atan(2^-2 ) */
+        534100635LL,   /* atan(2^-3 ) */
+        268086748LL,   /* atan(2^-4 ) */
+        134174063LL,   /* atan(2^-5 ) */
+        67103403LL,    /* atan(2^-6 ) */
+        33553749LL,    /* atan(2^-7 ) */
+        16777131LL,    /* atan(2^-8 ) */
+        8388597LL,     /* atan(2^-9 ) */
+        4194303LL,     /* atan(2^-10) */
+        2097152LL,     /* atan(2^-11) */
+        1048576LL,     /* atan(2^-12) */
+        524288LL,      /* atan(2^-13) */
+        262144LL,      /* atan(2^-14) */
+        131072LL,      /* atan(2^-15) */
+};
+
+fixed_status_t fixed_atan2(motion_fixed_t y, motion_fixed_t x, motion_fixed_t *out)
+{
+        motion_fixed_t angle = 0;
+        motion_fixed_t px, py;
+
+        if (out == 0)
+                return FIXED_E_INVAL;
+
+        if (x == 0) {
+                if (y == 0)
+                        return FIXED_E_INVAL;   /* 原点角度无定义 */
+                *out = y > 0 ? FIXED_PI_2 : -FIXED_PI_2;
+                return FIXED_OK;
+        }
+
+        /*
+         * 归到 x > 0 的半平面。
+         *
+         * 正确恒等式是 atan2(y, x) = π − atan2(y, −x)（x < 0），随后归一化到
+         * (−π, π]。早先写成 ±π 加减，模 2π 虽然同余，但**会把 y 的符号翻掉**：
+         * atan2(−0.35, −0.30) 得到 +2.279 而不是 −2.279，逆解于是把足端
+         * 关于 x 轴镜像。往返测试在一个取样点上抓到了它。
+         */
+        if (x < 0) {
+                if (fixed_atan2(y, -x, &angle) != FIXED_OK)
+                        return FIXED_E_INVAL;
+
+                *out = FIXED_PI - angle;
+
+                /* 归一化到 (−π, π] */
+                if (*out > FIXED_PI)
+                        *out -= FIXED_2PI;
+                else if (*out <= -FIXED_PI)
+                        *out += FIXED_2PI;
+
+                return FIXED_OK;
+        }
+
+        px = x;
+        py = y;
+
+        for (u8 i = 0; i < 16; i++) {
+                motion_fixed_t sx = px >> i;
+                motion_fixed_t sy = py >> i;
+
+                if (py >= 0) {
+                        px += sy;
+                        py -= sx;
+                        angle += cordic_atan[i];
+                } else {
+                        px -= sy;
+                        py += sx;
+                        angle -= cordic_atan[i];
+                }
+        }
+
+        *out = angle;
+        return FIXED_OK;
+}
+
+
+
+/*
+ * 整数平方根（向下取整）。牛顿迭代，只在两个 u64 之间做除法，
+ * 不产生 128 位除法调用。
+ */
+u64 fixed_isqrt_u64(u64 v)
+{
+        u64 x, y;
+
+        if (v == 0)
+                return 0;
+
+        /* 初值取 2 的幂：宁可高也不要低，牛顿从上方逼近 */
+        x = v;
+        y = (x + 1) / 2;
+        while (y < x) {
+                x = y;
+                y = (x + v / x) / 2;
+        }
+        return x;
+}
+
+/*
+ * Q32.32 平方根：sqrt(v_raw · 2^32) = isqrt(v_raw) · 2^16。
+ * 负数无定义 —— 返回 FIXED_E_INVAL 而不是一个假值。
+ */
+fixed_status_t fixed_sqrt(motion_fixed_t v, motion_fixed_t *out)
+{
+        if (out == 0)
+                return FIXED_E_INVAL;
+        if (v < 0)
+                return FIXED_E_INVAL;
+
+        *out = (motion_fixed_t)(fixed_isqrt_u64((u64)v) << 16);
+        return FIXED_OK;
+}
+
 fixed_status_t fixed_sin_cos(motion_fixed_t radians,
                              motion_fixed_t *sin_out,
                              motion_fixed_t *cos_out)

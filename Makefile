@@ -350,6 +350,14 @@ HANDOVER_TEST := build/host/test_handover.exe
 # 多关节协调：一条腿是两条接线，足端位置由大脑用实测角度算出。
 GAIT_TEST := build/host/test_gait.exe
 
+# 逆运动学与足端轨迹：说「足端去这里」，系统到达那里。
+FOOT_TEST := build/host/test_foot.exe
+
+$(FOOT_TEST): tests/host/test_foot.c brain/kinematics.c brain/control.c \
+              brain/handover.c brain/include/kinematics.h
+	@mkdir -p build/host
+	$(HOST_CC) $(HOST_CFLAGS) -Ibrain/include tests/host/test_foot.c -o $@
+
 $(GAIT_TEST): tests/host/test_gait.c brain/gait.c brain/kinematics.c \
               brain/handover.c brain/include/gait.h brain/include/kinematics.h
 	@mkdir -p build/host
@@ -419,7 +427,7 @@ fuzz: $(FUZZ_TEST)
 		echo "  确定性模糊出现失败"; exit 1; \
 	fi
 
-host-test: $(HOST_TEST) $(WIRE_TEST) $(MONITOR_TEST) $(QUAT_TEST) $(DEVICE_TEST) $(WHEEL_TEST) $(JOINT_TEST) $(MO_CONF) $(SINCOS_TEST) $(CONTROL_TEST) $(HANDOVER_TEST) $(GAIT_TEST)
+host-test: $(HOST_TEST) $(WIRE_TEST) $(MONITOR_TEST) $(QUAT_TEST) $(DEVICE_TEST) $(WHEEL_TEST) $(JOINT_TEST) $(MO_CONF) $(SINCOS_TEST) $(CONTROL_TEST) $(HANDOVER_TEST) $(GAIT_TEST) $(FOOT_TEST)
 	@$(HOST_TEST)
 	@$(WIRE_TEST)
 	@$(MONITOR_TEST)
@@ -432,6 +440,7 @@ host-test: $(HOST_TEST) $(WIRE_TEST) $(MONITOR_TEST) $(QUAT_TEST) $(DEVICE_TEST)
 	@$(CONTROL_TEST)
 	@$(HANDOVER_TEST)
 	@$(GAIT_TEST)
+	@$(FOOT_TEST)
 
 # MinGW 的 UBSan 运行库并非所有发行包都完整，因此使用 trap-on-error：
 # 编译器在任何 UB 点直接发出陷阱指令，不需要链接 sanitizer runtime。
@@ -497,6 +506,11 @@ sanitize:
 		tests/host/test_gait.c \
 		-o build/host/test_gait_ubsan.exe
 	@build/host/test_gait_ubsan.exe
+	$(HOST_CC) $(HOST_CFLAGS) -Ibrain/include -fsanitize=undefined \
+		-fsanitize-undefined-trap-on-error \
+		tests/host/test_foot.c \
+		-o build/host/test_foot_ubsan.exe
+	@build/host/test_foot_ubsan.exe
 	$(HOST_CC) $(HOST_CFLAGS) -fsanitize=undefined \
 		-fsanitize-undefined-trap-on-error \
 		tests/host/fuzz_base.c base/quat.c \

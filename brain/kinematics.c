@@ -92,3 +92,98 @@ bool leg_reachable(const leg_geometry_t *g, motion_fixed_t x, motion_fixed_t y)
          */
         return r2 <= hi2 + hi2 / 200 && r2 + lo2 / 200 >= lo2;
 }
+
+/* acos(c) = atan2(√(1−c²), c)，全部定点 */
+static leg_ik_status_t fixed_acos(motion_fixed_t c, motion_fixed_t *out)
+{
+        motion_fixed_t one, sq, root;
+
+        if (out == 0)
+                return LEG_IK_E_INVAL;
+
+        /* 容差外才判为不可达：CORDIC 与开方都有几个最低位的误差 */
+        if (c > Q_ONE + Q_ONE / 10000 || c < -Q_ONE - Q_ONE / 10000)
+                return LEG_IK_E_UNREACHABLE;
+
+        if (c > Q_ONE)
+                c = Q_ONE;
+        if (c < -Q_ONE)
+                c = -Q_ONE;
+
+        one = (motion_fixed_t)1 << 32;
+        if (fixed_mul_checked(c, c, &sq) != FIXED_OK)
+                return LEG_IK_E_INVAL;
+        if (fixed_sub_checked(one, sq, &sq) != FIXED_OK)
+                return LEG_IK_E_INVAL;
+        if (fixed_sqrt(sq, &root) != FIXED_OK)
+                return LEG_IK_E_INVAL;
+
+        return fixed_atan2(root, c, out) == FIXED_OK ? LEG_IK_OK : LEG_IK_E_INVAL;
+}
+
+leg_ik_status_t leg_ik(const leg_geometry_t *g, motion_fixed_t x,
+                       motion_fixed_t y, bool knee_up,
+                       motion_fixed_t *theta1, motion_fixed_t *theta2)
+{
+        motion_fixed_t r2, l1sq, l2sq, num, den, cos_t2, t2, s2, c2;
+        motion_fixed_t base, k1, k2, off, t1;
+
+        if (!geom_valid(g) || theta1 == 0 || theta2 == 0)
+                return LEG_IK_E_INVAL;
+
+        if (!leg_radius_squared(x, y, &r2))
+                return LEG_IK_E_INVAL;
+
+        /* 足端在髋点：θ₁ 自由，解无穷多（且 atan2(0,0) 无定义） */
+        if (r2 == 0)
+                return LEG_IK_E_DEGENERATE;
+
+        /* cos θ₂ = (r² − l1² − l2²) / (2·l1·l2) */
+        if (fixed_mul_checked(g->l1, g->l1, &l1sq) != FIXED_OK ||
+            fixed_mul_checked(g->l2, g->l2, &l2sq) != FIXED_OK)
+                return LEG_IK_E_INVAL;
+        if (fixed_sub_checked(r2, l1sq, &num) != FIXED_OK ||
+            fixed_sub_checked(num, l2sq, &num) != FIXED_OK)
+                return LEG_IK_E_INVAL;
+
+        if (fixed_mul_checked(g->l1, g->l2, &den) != FIXED_OK ||
+            fixed_mul2_checked(den, &den) != FIXED_OK)
+                return LEG_IK_E_INVAL;
+        if (den <= 0)
+                return LEG_IK_E_INVAL;
+
+        if (fixed_div_checked(num, den, &cos_t2) != FIXED_OK)
+                return LEG_IK_E_INVAL;
+
+        leg_ik_status_t st = fixed_acos(cos_t2, &t2);
+
+        if (st != LEG_IK_OK)
+                return st;
+
+        /* 两个解：膝上取 +θ₂，膝下取 −θ₂ */
+        if (!knee_up)
+                t2 = -t2;
+
+        if (fixed_sin_cos(t2, &s2, &c2) != FIXED_OK)
+                return LEG_IK_E_INVAL;
+
+        /*
+         * θ₁ = atan2(y, x) − atan2(l2·sin θ₂, l1 + l2·cos θ₂)
+         */
+        if (fixed_atan2(y, x, &base) != FIXED_OK)
+                return LEG_IK_E_INVAL;
+
+        if (fixed_mul_checked(g->l2, s2, &k1) != FIXED_OK ||
+            fixed_mul_checked(g->l2, c2, &k2) != FIXED_OK ||
+            fixed_add_checked(g->l1, k2, &k2) != FIXED_OK)
+                return LEG_IK_E_INVAL;
+        if (fixed_atan2(k1, k2, &off) != FIXED_OK)
+                return LEG_IK_E_INVAL;
+
+        if (fixed_sub_checked(base, off, &t1) != FIXED_OK)
+                return LEG_IK_E_INVAL;
+
+        *theta1 = t1;
+        *theta2 = t2;
+        return LEG_IK_OK;
+}
