@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # hotplug-test.sh — 运行时热插拔验证
 #
 # 内核启动后，通过 QEMU 监视器在运行中插入一块 e1000 网卡，再把它拔出。
@@ -8,7 +9,7 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
 if [ -d /ucrt64/bin ]; then export PATH=/usr/bin:/bin:/ucrt64/bin:$PATH; fi
 
-BIN=build/x86_64/liteos.bin
+BIN=build/x86_64/donos.bin
 LOG=${1:-build/hotplug.log}
 
 if [ ! -f "$BIN" ]; then

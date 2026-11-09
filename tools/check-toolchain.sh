@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # check-toolchain.sh — 检查构建与运行所需的真实工具链
 #
 # 与 Makefile 实际使用的工具保持一致：clang + lld。

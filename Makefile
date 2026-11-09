@@ -1,4 +1,5 @@
-# liteOS — 构建系统
+# SPDX-License-Identifier: GPL-2.0-only
+# DONos — 构建系统
 #
 # 工具链：clang + lld（能输出裸机 ELF），nasm，qemu
 # 用法：
@@ -8,8 +9,11 @@
 #   make clean
 
 ARCH      ?= x86_64
-BUILD     ?= build/$(ARCH)
-OUT       := liteos.bin
+# SELFTEST=1：把自检与基准编进镜像（用于验证）；默认 0 构建发布镜像。
+# 两者输出到不同目录，互不覆盖，因此 make check 与发布构建可以先后共存。
+SELFTEST  ?= 0
+BUILD     ?= build/$(ARCH)$(if $(filter 1,$(SELFTEST)),/selftest,)
+OUT       := donos.bin
 
 # ---------------------------------------------------------------------
 # 目标三元组：裸机，无宿主 ABI
@@ -53,7 +57,7 @@ CFLAGS    := --target=$(TARGET_TRIPLE) \
              -fno-pic -fno-pie \
              $(ARCH_CFLAGS) \
              -Wall -Wextra -Werror \
-             -Ibase/include -Idrivers/include -Iarch/$(ARCH)/include
+             -Ibase/include -Ibrain/include -Imonitor/include -Idrivers/include -Iarch/$(ARCH)/include
 
 # 用 clang 驱动链接，它会按 --target 选择 ELF 模式并使用 lld。
 # 直接调 ld.lld 在 MSYS2 上会误用 PE 驱动。
@@ -76,14 +80,47 @@ endif
 
 # ---------------------------------------------------------------------
 # 源文件
+#
+# 证据代码（自检、基准、故障探针）只在 SELFTEST=1 时编入。
+# 理由：自检是证明手段，不是产品的一部分。把它无条件链进发布镜像，
+# 会让每个部署都背着几十 KB 的测试代码 —— 而微内核的价值恰恰是「小」。
 # ---------------------------------------------------------------------
-C_SRCS := $(wildcard base/*.c) \
-          $(wildcard drivers/*.c) \
-          $(wildcard arch/$(ARCH)/*.c)
+# 每个架构的「仅自检」文件不同：riscv64 的 mmu.c 是真正的建表代码
+# （无条件需要），而 x86_64 的 mmu.c 只是探测辅助。
+ifeq ($(ARCH),x86_64)
+SELFTEST_ONLY_C := base/verify.c base/bench.c brain/brain_verify.c \
+                   monitor/monitor_verify.c \
+                   arch/x86_64/mmu.c arch/x86_64/mmu_verify.c
+SELFTEST_ONLY_PROBE := arch/x86_64/mmu_probe.asm
+else
+SELFTEST_ONLY_C := base/verify.c base/bench.c brain/brain_verify.c \
+                   monitor/monitor_verify.c arch/riscv64/mmu_verify.c
+SELFTEST_ONLY_PROBE := arch/riscv64/mmu_probe.S
+endif
+
+C_SRCS := $(filter-out $(SELFTEST_ONLY_C), \
+            $(wildcard base/*.c) \
+            $(wildcard brain/*.c) \
+            $(wildcard monitor/*.c) \
+            $(wildcard drivers/*.c) \
+            $(wildcard arch/$(ARCH)/*.c))
 
 # x86_64 用 nasm（.asm）；riscv64 用 clang 汇编（.S）
-ASM_SRCS := $(wildcard arch/$(ARCH)/*.asm)
-S_SRCS   := $(wildcard arch/$(ARCH)/*.S)
+ASM_SRCS := $(filter-out arch/$(ARCH)/mmu_probe.asm, \
+              $(wildcard arch/$(ARCH)/*.asm))
+S_SRCS   := $(filter-out arch/$(ARCH)/mmu_probe.S, \
+              $(wildcard arch/$(ARCH)/*.S))
+
+# 故障注入探针只在自检构建里链接：它们的存在本身就是为了故意违约。
+ifeq ($(SELFTEST),1)
+CFLAGS   += -DDONOS_SELFTEST=1
+C_SRCS   += $(SELFTEST_ONLY_C)
+ifneq ($(filter %.asm,$(SELFTEST_ONLY_PROBE)),)
+ASM_SRCS += $(SELFTEST_ONLY_PROBE)
+else
+S_SRCS   += $(SELFTEST_ONLY_PROBE)
+endif
+endif
 
 C_OBJS   := $(patsubst %.c,$(BUILD)/%.o,$(C_SRCS))
 ASM_OBJS := $(patsubst %.asm,$(BUILD)/%.o,$(ASM_SRCS))
@@ -153,21 +190,50 @@ size: $(BUILD)/$(OUT)
 # What actually drags libgcc in is __int128 arithmetic without hardware
 # support (e.g. __multi3 on rv64iac), and soft float later on.
 # ---------------------------------------------------------------------
+bench-latency:
+	@set -e; \
+	$(MAKE) ARCH=x86_64 SELFTEST=1 >/dev/null; \
+	$(MAKE) ARCH=riscv64 SELFTEST=1 >/dev/null; \
+	rm -f build/bench-x86_64.log build/bench-riscv64.log; \
+	SELFTEST=1 tools/bench.sh >/dev/null; \
+	for arch in x86_64 riscv64; do \
+		log=build/bench-$$arch.log; \
+		grep -q '^  latency p50     :' $$log || { echo "$$arch 缺少 p50"; exit 1; }; \
+		grep -q '^  latency p99     :' $$log || { echo "$$arch 缺少 p99"; exit 1; }; \
+		grep -q '^  latency p99.9   :' $$log || { echo "$$arch 缺少 p99.9"; exit 1; }; \
+		grep -q '^  latency max     :' $$log || { echo "$$arch 缺少 max"; exit 1; }; \
+		grep -q '^  latency histogram ' $$log || { echo "$$arch 缺少直方图"; exit 1; }; \
+		grep -q '^  ok   latency budget: p99.9 is below 50% of one tick$$' $$log || { echo "$$arch p99.9 超预算"; exit 1; }; \
+		grep -q '^  ok   latency budget: max is below 75% of one tick$$' $$log || { echo "$$arch max 超预算"; exit 1; }; \
+		echo "  ok   $$arch latency distribution"; \
+	done
+
 check:
 	@set -e; \
 	echo "=== 构建两个架构 / building both architectures ==="; \
-	$(MAKE) ARCH=x86_64 >/dev/null; \
-	$(MAKE) ARCH=riscv64 >/dev/null; \
+	$(MAKE) ARCH=x86_64 SELFTEST=1 >/dev/null; \
+	$(MAKE) ARCH=riscv64 SELFTEST=1 >/dev/null; \
 	echo "=== 运行测量与压力测试 / running measurements ==="; \
 	rm -f build/bench-x86_64.log build/bench-riscv64.log; \
-	tools/bench.sh >/dev/null 2>&1; \
+	SELFTEST=1 tools/bench.sh >/dev/null 2>&1; \
 	for arch in x86_64 riscv64; do \
 		log=build/bench-$$arch.log; \
 		test -s $$log || { echo "缺少日志 $$log"; exit 1; }; \
+		if grep -qE '^  FAIL ' $$log; then \
+			echo "$$arch 自检有明确失败行"; grep -E '^  FAIL ' $$log; exit 1; \
+		fi; \
 		grep -qE '^  failures = 0$$' $$log || { echo "$$arch 自检失败"; grep -E '^  (FAIL|failures)' $$log; exit 1; }; \
 		grep -qE '^  bench failures = 0$$' $$log || { echo "$$arch 压力测试失败"; grep -E 'bench failures' $$log; exit 1; }; \
+		grep -q '^  endurance ticks = ' $$log || { echo "$$arch 缺少长期运行证据"; exit 1; }; \
+		grep -q '^  storm ticks = ' $$log || { echo "$$arch 缺少中断风暴证据"; exit 1; }; \
+		if [ "$$arch" = riscv64 ]; then \
+			grep -q '^  ok   \.data initializer survived boot$$' $$log || { echo "riscv64 静态初值在引导清零中丢失"; exit 1; }; \
+		fi; \
+		grep -qE '^  monitor failures = 0$$' $$log || { echo "$$arch 监视器自检失败"; grep -E 'monitor failures' $$log; exit 1; }; \
+		grep -qE '^  brain failures = 0$$' $$log || { echo "$$arch 大脑热切换自检失败"; grep -E 'brain failures' $$log; exit 1; }; \
+		grep -qE '^  mmu failures = 0$$' $$log || { echo "$$arch MMU 自检失败"; grep -E 'mmu failures' $$log; exit 1; }; \
 		grep -q 'protection: what the MMU actually enforces' $$log || { echo "$$arch 未自报保护状态"; exit 1; }; \
-		if logs=$$($(NM) build/$$arch/liteos.bin 2>/dev/null | grep ' U ' | awk '{print $$2}'); \
+		if logs=$$($(NM) build/$$arch/selftest/donos.bin 2>/dev/null | grep ' U ' | awk '{print $$2}'); \
 		   [ -n "$$logs" ]; then \
 			echo "$$arch 仍有未定义的运行时符号（裸机没有库可链接）:"; \
 			echo "$$logs"; exit 1; \
@@ -178,3 +244,244 @@ check:
 
 clean:
 	rm -rf build
+
+# ---------------------------------------------------------------------
+# 独立门禁：每一项都只断言一个可证伪的事实。
+# ---------------------------------------------------------------------
+
+# 符号门禁：镜像必须存在、非空，且不含任何未定义符号。
+# 裸机没有运行时库可链接，所以任何 ' U ' 符号都是运行时跳向地址零。
+.PHONY: check-symbols check-docs check-release check-all check-purity \
+        check-single-core check-size check-slim bench-latency fuzz \
+        host-test sanitize
+check-symbols:
+	@set -e; \
+	for arch in x86_64 riscv64; do \
+		bin=build/$$arch/donos.bin; \
+		test -s $$bin || { echo "缺少镜像 $$bin"; exit 1; }; \
+		out=$$($(NM) $$bin 2>/dev/null | grep ' U ' || true); \
+		if [ -n "$$out" ]; then \
+			echo "$$arch 仍有未定义符号:"; echo "$$out"; exit 1; \
+		fi; \
+		echo "  ok   $$arch 无未定义符号"; \
+	done
+
+# 文档门禁：中英文必须成对存在，且不得残留发布占位符
+check-docs:
+	@set -e; \
+	for pair in design conformance assessment boot; do \
+		test -f docs/$$pair.md || { echo "缺少 docs/$$pair.md"; exit 1; }; \
+		test -f docs/$$pair.en.md || { echo "缺少 docs/$$pair.en.md"; exit 1; }; \
+	done; \
+	echo "  ok   中英文文档成对"; \
+	if grep -Rn 'OWNER/REPO\|@OWNER' --include='*.md' --include='*.yml' --include='*.cff' . ; then \
+		echo "  仍有 OWNER/REPO 占位符（发布前必须替换）"; exit 1; \
+	fi; \
+	echo "  ok   无发布占位符"
+
+# 纯净性门禁：基座只做运动控制，因此 base/base.c 里不得出现能力、行程、
+# 姿态、质量这些「世界信息」的名字 —— 一旦出现，基座就开始理解世界了，
+# 而「基座无状态」这条不变量正是靠「它无从理解」来成立的。
+# 这条可被证伪的静态断言，不是口号：符号名一旦写进去，门禁立刻失败。
+#
+# brain 也在名单里（设计决定 13）：基座若能说出「大脑」这个词，
+# 它就有了「谁在思考」这个概念，也就有了特权层的雏形。大脑只能是
+# 基座之外的一段代码，靠普通接线与基座发生关系。
+check-purity:
+	@set -e; \
+	if grep -nE 'cap|limit_min|limit_max|max_rate|mass|orientation|position|described|still|brain' \
+		base/base.c; then \
+		echo "base/base.c 出现了非运动控制的名字（基座不应理解世界）"; exit 1; \
+	fi; \
+	echo "  ok   base/base.c 只提到接线与原语"
+
+HOST_CC     ?= clang
+HOST_CFLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror \
+               -Ibase/include
+HOST_TEST   := build/host/test_fixed.exe
+
+$(HOST_TEST): tests/host/test_fixed.c base/fixed.c base/include/fixed.h \
+              base/include/base.h base/include/types.h
+	@mkdir -p build/host
+	$(HOST_CC) $(HOST_CFLAGS) tests/host/test_fixed.c base/fixed.c -o $@
+
+# 白盒测试：整体包含 base/base.c 才能把接线表推到世代耗尽的边界。
+# 四十亿次热插拔不是测试，是等；而边界行为与真跑到底读的是同一张表。
+WIRE_TEST    := build/host/test_wire.exe
+MONITOR_TEST := build/host/test_monitor.exe
+
+$(WIRE_TEST): tests/host/test_wire.c base/base.c base/include/base.h \
+              base/include/types.h
+	@mkdir -p build/host
+	$(HOST_CC) $(HOST_CFLAGS) tests/host/test_wire.c -o $@
+
+$(MONITOR_TEST): tests/host/test_monitor.c monitor/monitor.c base/quat.c \
+                 monitor/include/monitor.h base/base.c base/object.c base/fixed.c \
+                 base/include/base.h base/include/object.h base/include/fixed.h \
+                 base/include/quat.h
+	@mkdir -p build/host
+	$(HOST_CC) $(HOST_CFLAGS) -Imonitor/include tests/host/test_monitor.c base/quat.c -o $@
+
+# 姿态积分与行程限位的宿主边界：期望值全部手算，不回读实现。
+QUAT_TEST := build/host/test_quat.exe
+
+$(QUAT_TEST): tests/host/test_quat.c base/base.c base/fixed.c base/quat.c \
+              base/object.c base/include/base.h base/include/types.h \
+              base/include/fixed.h base/include/quat.h base/include/object.h
+	@mkdir -p build/host
+	$(HOST_CC) $(HOST_CFLAGS) tests/host/test_quat.c -o $@
+
+# 确定性模糊：固定种子 → 可复现。语料覆盖 8 类操作（含专门核对 dof
+# 尾部的 apply_tail），不变量由影子表独立对账。
+# 注意它抓不到什么：object_plug() 的发布顺序窗口在单线程下是**等价
+# 变异体** —— 函数返回前状态已一致，只有并发读者才看得见那个窗口。
+# 那条纪律靠顺序论证与复用槽位测试（verify.c 第十三部分）保证，不靠这里。
+FUZZ_TEST   := build/host/fuzz_base.exe
+FUZZ_ITERS  ?= 200000
+
+$(FUZZ_TEST): tests/host/fuzz_base.c base/quat.c base/base.c base/object.c base/fixed.c \
+              base/include/base.h base/include/object.h base/include/fixed.h base/include/quat.h
+	@mkdir -p build/host
+	$(HOST_CC) $(HOST_CFLAGS) tests/host/fuzz_base.c base/quat.c -o $@
+
+fuzz: $(FUZZ_TEST)
+	@$(FUZZ_TEST) $(FUZZ_ITERS) | tee build/host/fuzz.log
+	@set -e; \
+	if grep -q '^  fuzz failures = 0$$' build/host/fuzz.log; then \
+		echo "  ok   确定性模糊 0 失败"; \
+	else \
+		echo "  确定性模糊出现失败"; exit 1; \
+	fi
+
+host-test: $(HOST_TEST) $(WIRE_TEST) $(MONITOR_TEST) $(QUAT_TEST)
+	@$(HOST_TEST)
+	@$(WIRE_TEST)
+	@$(MONITOR_TEST)
+	@$(QUAT_TEST)
+
+# MinGW 的 UBSan 运行库并非所有发行包都完整，因此使用 trap-on-error：
+# 编译器在任何 UB 点直接发出陷阱指令，不需要链接 sanitizer runtime。
+sanitize:
+	@mkdir -p build/host
+	$(HOST_CC) $(HOST_CFLAGS) -fsanitize=undefined \
+		-fsanitize-undefined-trap-on-error \
+		tests/host/test_fixed.c base/fixed.c \
+		-o build/host/test_fixed_ubsan.exe
+	@build/host/test_fixed_ubsan.exe
+	$(HOST_CC) $(HOST_CFLAGS) -fsanitize=undefined \
+		-fsanitize-undefined-trap-on-error \
+		tests/host/test_wire.c \
+		-o build/host/test_wire_ubsan.exe
+	@build/host/test_wire_ubsan.exe
+	$(HOST_CC) $(HOST_CFLAGS) -Imonitor/include -fsanitize=undefined \
+		-fsanitize-undefined-trap-on-error \
+		tests/host/test_monitor.c base/quat.c \
+		-o build/host/test_monitor_ubsan.exe
+	@build/host/test_monitor_ubsan.exe
+	$(HOST_CC) $(HOST_CFLAGS) -fsanitize=undefined \
+		-fsanitize-undefined-trap-on-error \
+		tests/host/test_quat.c \
+		-o build/host/test_quat_ubsan.exe
+	@build/host/test_quat_ubsan.exe
+	$(HOST_CC) $(HOST_CFLAGS) -fsanitize=undefined \
+		-fsanitize-undefined-trap-on-error \
+		tests/host/fuzz_base.c base/quat.c \
+		-o build/host/fuzz_base_ubsan.exe
+	@build/host/fuzz_base_ubsan.exe 50000
+
+check-size:
+	@set -e; \
+	$(MAKE) ARCH=x86_64 SELFTEST=1 >/dev/null; \
+	$(MAKE) ARCH=riscv64 SELFTEST=1 >/dev/null; \
+	SELFTEST=1 tools/size.sh | tee build/size.log; \
+	grep -q '^  size failures = 0$$' build/size.log || { echo "自检镜像体积或静态内存超出预算"; exit 1; }
+
+# 发布镜像门禁：证据代码必须不在里面，且镜像真的能跑。
+#
+# 这条门禁存在的理由很具体：自检曾被无条件链进内核，于是每次部署都
+# 背着几十 KB 测试代码，而 `make check` 全程绿灯。现在断言三件事：
+#   (a) 发布镜像里不存在任何自检/基准/故障探针符号；
+#   (b) 发布镜像体积落在更紧的预算内；
+#   (c) 发布镜像能启动、跑完 live 演示并报告「物件仍在运动」。
+check-slim:
+	@set -e; \
+	$(MAKE) ARCH=x86_64 SELFTEST=0 >/dev/null; \
+	$(MAKE) ARCH=riscv64 SELFTEST=0 >/dev/null; \
+	for arch in x86_64 riscv64; do \
+		bin=build/$$arch/donos.bin; \
+		test -s $$bin || { echo "缺少发布镜像 $$bin"; exit 1; }; \
+		if hits=$$($(NM) $$bin 2>/dev/null | grep -E ' (base_verify|bench_run|monitor_verify|brain_verify|arch_mmu_verify)$$'); then \
+			echo "$$arch 发布镜像残留自检符号（证据不应随固件出货）:"; \
+			echo "$$hits"; exit 1; \
+		fi; \
+	done; \
+	SELFTEST=0 tools/size.sh | tee build/size-release.log; \
+	grep -q '^  size failures = 0$$' build/size-release.log || { echo "发布镜像体积超出预算"; exit 1; }; \
+	for arch in x86_64 riscv64; do \
+		log=build/release-$$arch.log; \
+		rm -f $$log; \
+		if [ "$$arch" = x86_64 ]; then \
+			timeout 40 qemu-system-x86_64 -icount shift=0,align=off,sleep=off \
+				-kernel build/x86_64/donos.bin -m 256M \
+				-serial file:$$log -display none -no-reboot -no-shutdown >/dev/null 2>&1 || true; \
+		else \
+			timeout 70 qemu-system-riscv64 -icount shift=0,align=off,sleep=off \
+				-machine virt -bios default -m 256M \
+				-kernel build/riscv64/donos.bin -device e1000 \
+				-serial file:$$log -display none -no-reboot >/dev/null 2>&1 || true; \
+		fi; \
+		tr -d '\r' < $$log | grep -q 'objects keep moving' || { \
+			echo "$$arch 发布镜像没有跑到 live 演示"; tail -20 $$log; exit 1; }; \
+		echo "  ok   $$arch release image boots and runs"; \
+	done
+
+# 单核门禁：把「目前只支持单核」从形容词变成可证伪的事实。
+#   (a) 源码里不得出现并发原语 —— 出现即说明有人开始做 SMP，而表还没有锁；
+#   (b) 中断入口不得执行运动环 —— 否则主循环与 ISR 会在无锁表上重入；
+#   (c) 设计文档必须同时存在中英文的并发模型章节，声明不能只活在代码注释里。
+# 许可证门禁：每个源文件都必须带 SPDX 标识，且与 LICENSE 一致。
+#
+# SPDX 头是机器可读的许可证声明。没有它，代码一旦被拆走一个文件，
+# 那个文件就没有任何许可证信息 —— 这在实际分发里是真实的法律风险。
+# 因此这里逐文件断言，而不是只在 README 里写一句。
+check-spdx:
+	@set -e; \
+	if grep -q 'SPDX-License-Identifier' LICENSE && \
+	   ! grep -q 'GPL-2.0-only' LICENSE; then \
+		echo "LICENSE 里的 SPDX 标识不是 GPL-2.0-only"; exit 1; \
+	fi; \
+	missing=$$(find . -path ./build -prune -o -path ./.git -prune -o -type f \
+		\( -name '*.c' -o -name '*.h' -o -name '*.asm' -o -name '*.S' \
+		   -o -name '*.ld' -o -name '*.sh' -o -name 'Makefile' \) -print \
+		| xargs grep -L 'SPDX-License-Identifier: GPL-2.0-only' 2>/dev/null || true); \
+	if [ -n "$$missing" ]; then \
+		echo "以下源文件缺少 SPDX-License-Identifier: GPL-2.0-only"; \
+		echo "$$missing"; exit 1; \
+	fi; \
+	echo "  ok   所有源文件都带 GPL-2.0-only 的 SPDX 标识"
+
+check-single-core:
+	@set -e; \
+	if hits=$$(grep -rInE '__atomic|_Atomic|spinlock|spin_lock|mutex|memory_order|__sync_' \
+		base brain monitor drivers arch base/include 2>/dev/null); then \
+		echo "源码出现并发原语，但接线表与物件表尚未加锁（见 docs/design.md 并发模型）:"; \
+		echo "$$hits"; exit 1; \
+	fi; \
+	for f in arch/x86_64/idt.c arch/x86_64/isr.asm arch/riscv64/trap.c arch/riscv64/traps.S; do \
+		if hits=$$(grep -nE 'object_run|base_apply|object_step' $$f); then \
+			echo "$$f 在中断路径里执行运动环（会造成无锁重入）:"; \
+			echo "$$hits"; exit 1; \
+		fi; \
+	done; \
+	for d in docs/design.md docs/design.en.md; do \
+		grep -qE '^## (9|10)\. (并发模型|Concurrency model)' $$d || { \
+			echo "$$d 缺少并发模型章节"; exit 1; }; \
+	done; \
+	echo "  ok   单核、不可重入：无并发原语，中断不跑运动环，模型已声明"
+
+check-release: check-symbols check-docs check-purity check-single-core check-spdx
+	@echo "=== 发布前门禁通过 / release gate passed ==="
+
+check-all: check bench-latency check-size check-slim host-test fuzz \
+           sanitize check-release
+	@echo "=== 全部门禁通过 / all gates passed ==="

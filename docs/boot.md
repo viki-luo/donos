@@ -131,7 +131,7 @@ QEMU 的 PVH 加载器按 ELF 段的 **`FileSiz`** 建立映射。纯 `NOBITS`
 验证方法：
 
 ```sh
-readelf -l liteos.bin | grep -A2 LOAD
+readelf -l donos.bin | grep -A2 LOAD
 # 可写段的 FileSiz 必须非零
 ```
 
@@ -172,10 +172,10 @@ make BOOT_TRACE=1
 ### 用 gdb 看真实寄存器
 
 ```sh
-qemu-system-x86_64 -kernel liteos.bin -m 256M \
+qemu-system-x86_64 -kernel donos.bin -m 256M \
         -serial file:build/serial.log -display none \
         -no-reboot -no-shutdown -gdb tcp::1240 -S
-gdb -q liteos.bin -ex 'target remote localhost:1240'
+gdb -q donos.bin -ex 'target remote localhost:1240'
 ```
 
 **注意**：每次调试前先清掉残留的 QEMU 进程。否则新 QEMU 绑定不了

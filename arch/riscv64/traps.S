@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * traps.S — riscv64 陷阱入口
  *
@@ -48,6 +49,8 @@ trap_entry:
         csrr    a1, sepc
         csrr    a2, stval
         call    trap_dispatch
+        /* trap_dispatch returns the exact sepc to resume at in a0. */
+        csrw    sepc, a0
 
         ld      x1,    0(sp)
         ld      x3,    8(sp)

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * report.h — 诊断输出接口
  *
@@ -6,8 +7,8 @@
  *
  * 这样 base/ 下的测试代码不必去包含 x86 的头文件，分层不会被测试破坏。
  */
-#ifndef LITEOS_REPORT_H
-#define LITEOS_REPORT_H
+#ifndef DONOS_REPORT_H
+#define DONOS_REPORT_H
 
 #include "types.h"
 
@@ -31,4 +32,23 @@ u64 arch_cycles(void);
 /* 自开机以来的定时器节拍数。频率由架构层决定（两架构均为 100 Hz）。 */
 u64 arch_ticks(void);
 
-#endif /* LITEOS_REPORT_H */
+/*
+ * 额定节拍频率：两架构一致（10 ms 一拍）。
+ * 长期运行与中断风暴的期望值都从它推导，不从架构头文件引入。
+ */
+#define ARCH_TICK_HZ 100u
+
+/*
+ * 中断风暴测试原语：临时把节拍中断改到 hz。
+ * 恢复额定频率用 arch_timer_hz(ARCH_TICK_HZ)。
+ */
+void arch_timer_hz(u32 hz);
+
+/*
+ * 基准测量临界区：只用于隔离 object_run 自身的执行延迟，避免异步
+ * 定时器中断混入函数级分位数。禁用时间必须短，测量结束后立即恢复。
+ */
+void arch_irq_enable(void);
+void arch_irq_disable(void);
+
+#endif /* DONOS_REPORT_H */

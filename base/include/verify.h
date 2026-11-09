@@ -1,8 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * verify.h — 基座语义自检
  */
-#ifndef LITEOS_VERIFY_H
-#define LITEOS_VERIFY_H
+#ifndef DONOS_VERIFY_H
+#define DONOS_VERIFY_H
 
 /*
  * 跑完所有验证，返回失败条数（0 表示全过）。
@@ -13,4 +14,4 @@
  */
 int base_verify(void);
 
-#endif /* LITEOS_VERIFY_H */
+#endif /* DONOS_VERIFY_H */

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * console.c — riscv64 串口控制台（QEMU virt 的 16550 UART）
  *
@@ -101,6 +102,6 @@ void arch_report_protection(void)
                 arch_puts("translation active");
 
         arch_puts(")\n");
-        arch_puts("  => all memory is RWX to S-mode; there is no user mode here,\n");
+        arch_puts("  => memory is translated in S-mode; there is no user mode here,\n");
         arch_puts("     so an upper brain runs with the same privilege as the base.\n");
 }

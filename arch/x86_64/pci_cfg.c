@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * pci_cfg.c — x86_64 的 PCI 配置空间访问与热插拔弹出
  *

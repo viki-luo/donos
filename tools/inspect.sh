@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # inspect.sh — 检查构建产物
 set -e
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
 if [ -d /ucrt64/bin ]; then export PATH=/usr/bin:/bin:/ucrt64/bin:$PATH; fi
 
-BIN=build/x86_64/liteos.bin
+BIN=build/x86_64/donos.bin
 
 if [ ! -f "$BIN" ]; then
         echo "NOT FOUND: $BIN"

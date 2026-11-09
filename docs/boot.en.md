@@ -140,7 +140,7 @@ For the same reason the stack uses `times 64 * 1024 db 0` rather than
 How to check:
 
 ```sh
-readelf -l liteos.bin | grep -A2 LOAD
+readelf -l donos.bin | grep -A2 LOAD
 # FileSiz of the writable segment must be non-zero
 ```
 
@@ -185,10 +185,10 @@ transition. `C` without further output means the problem is in C code.
 ### Inspecting real registers with gdb
 
 ```sh
-qemu-system-x86_64 -kernel liteos.bin -m 256M \
+qemu-system-x86_64 -kernel donos.bin -m 256M \
         -serial file:build/serial.log -display none \
         -no-reboot -no-shutdown -gdb tcp::1240 -S
-gdb -q liteos.bin -ex 'target remote localhost:1240'
+gdb -q donos.bin -ex 'target remote localhost:1240'
 ```
 
 **Caution**: kill leftover QEMU processes before each session. Otherwise

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * arch.h — x86_64 架构层接口
  *
@@ -7,8 +8,8 @@
  * 这条分工很重要：基座必须保持硬件无关，才能被搬到别的处理器架构上；
  * 一切和具体机器绑定的东西都收在本层。
  */
-#ifndef LITEOS_ARCH_H
-#define LITEOS_ARCH_H
+#ifndef DONOS_ARCH_H
+#define DONOS_ARCH_H
 
 #include "types.h"
 
@@ -68,6 +69,9 @@ void arch_irq_disable(void);
 /* 自启动以来经过的节拍数。由 IRQ0 累加。 */
 u64 arch_ticks(void);
 
+/* 临时把节拍中断改到 hz；额定值见 report.h 的 ARCH_TICK_HZ。 */
+void arch_timer_hz(u32 hz);
+
 /* ------------------------------------------------------------------ */
 /* 测量                                                                */
 /* ------------------------------------------------------------------ */
@@ -95,4 +99,64 @@ u64 arch_cycles(void);
  */
 void arch_report_protection(void);
 
-#endif /* LITEOS_ARCH_H */
+/* ------------------------------------------------------------------ */
+/* MMU 隔离（W^X 中能真正装上的那一部分）                               */
+/* ------------------------------------------------------------------ */
+
+/*
+ * 装保护：唯一入口，发布镜像与自检镜像都走它。
+ * 返回 false 表示本机不支持 NX —— 此时无法做 W^X，调用者必须如实报告。
+ */
+bool arch_mmu_enable(void);
+
+/*
+ * 下面这些是**探测辅助**，只在 DONOS_SELFTEST=1 的构建里存在。
+ * 发布镜像不链接它们 —— 发布镜像只需要上面的 arch_mmu_enable()。
+ */
+bool arch_mmu_enable_nx(void);
+
+/* 把 2 MiB 及以上的大页标为不可执行，返回实际标记的页数。 */
+u32 arch_mmu_mark_data_nx(void);
+
+/* 打开 CR0.WP：内核态写也必须遵守页表项的可写位。 */
+bool arch_mmu_enable_wp(void);
+
+/* 读某一 2 MiB 页的页目录项。 */
+u64 arch_mmu_entry(u32 page_2mib);
+
+/* 改某一 2 MiB 页的可写位，返回该项原值（用于复原）。 */
+u64 arch_mmu_set_writable(u32 page_2mib, bool writable);
+
+/*
+ * 强行拨动 CR0.WP，用于证明「权限位 + 保护位」缺一不可：
+ * 项标了只读而 WP=0 时，内核态照样写得进去。
+ */
+void arch_mmu_set_wp(bool on);
+
+/* 精确恢复一个 2 MiB 页目录项并刷新地址翻译。 */
+void arch_mmu_set_entry(u32 page_2mib, u64 entry);
+
+/*
+ * 把第 0 个 2 MiB 大页拆成 4 KiB 页，实现完整 W^X。
+ * 必须先 arch_mmu_enable_nx()。返回实际建立的页数。
+ */
+u32 arch_mmu_split_kernel(void);
+
+/* 读第 0 个 4 KiB 页表项（page_4kib 为 0..511，自检用）。 */
+u64 arch_mmu_pte(u32 page_4kib);
+
+/* 可恢复的预期 #PF，仅用于 MMU 自检。 */
+void arch_fault_expect(u64 error, u64 rip, u64 cr2, u64 resume);
+bool arch_fault_result(u64 *error, u64 *rip, u64 *cr2);
+
+/* 固定汇编探针；恢复地址是导出标签，不靠猜测指令长度。 */
+void arch_probe_write(void *target);
+void arch_probe_exec(void *target);
+extern char arch_probe_write_fault[];
+extern char arch_probe_write_resume[];
+extern char arch_probe_exec_resume[];
+
+/* 打印并修正保护状态；返回失败计数。 */
+int arch_mmu_verify(void);
+
+#endif /* DONOS_ARCH_H */

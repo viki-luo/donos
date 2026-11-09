@@ -1,10 +1,10 @@
 # 贡献指南 / Contributing Guide
 
-感谢你对 liteOS 的关注！/ *Thanks for your interest in liteOS!*
+感谢你对 DONos 的关注！/ *Thanks for your interest in DONos!*
 
-liteOS 是一个围绕单一理念构建的项目：**一切皆运动，基座只管运动控制**。因此，贡献之前请先理解这条设计律，它决定了什么代码可以被接受。
+DONos 是一个围绕单一理念构建的项目：**一切皆运动，基座只管运动控制**。因此，贡献之前请先理解这条设计律，它决定了什么代码可以被接受。
 
-*liteOS is built around a single idea: **everything is motion, and the base does only motion control**. Before contributing, please understand this design law — it determines what code can be accepted.*
+*DONos is built around a single idea: **everything is motion, and the base does only motion control**. Before contributing, please understand this design law — it determines what code can be accepted.*
 
 ---
 
@@ -58,7 +58,7 @@ the full gate.*
   - 函数、变量 / functions, variables：`snake_case`
   - 类型 / types：`snake_case_t`（如 `motion_event_t`）
   - 宏 / macros：`UPPER_SNAKE_CASE`
-- **头文件保护 / Header guards**：`LITEOS_<PATH>_H`
+- **头文件保护 / Header guards**：`DONOS_<PATH>_H`
 - **注释 / Comments**：中文或英文均可，同一文件内保持一种语言 / Either Chinese or English, but stay consistent within a file
 
 ---

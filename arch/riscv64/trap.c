@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * trap.c — riscv64 陷阱处理（QEMU virt + OpenSBI）
  *
@@ -30,6 +31,52 @@
 static volatile u64 tick_count;
 
 extern void trap_entry(void);
+
+typedef struct {
+        volatile bool armed;
+        volatile bool seen;
+        u64 cause;
+        u64 sepc;
+        u64 stval;
+        u64 resume;
+        u64 observed_cause;
+        u64 observed_sepc;
+        u64 observed_stval;
+} expected_fault_t;
+
+static expected_fault_t expected_fault;
+
+void arch_trap_init(void)
+{
+        u64 vec = (u64)(uintptr_t)trap_entry;
+        __asm__ volatile("csrw stvec, %0" :: "r"(vec) : "memory");
+}
+
+void arch_fault_expect(u64 cause, u64 sepc, u64 stval, u64 resume)
+{
+        expected_fault.seen = false;
+        expected_fault.cause = cause;
+        expected_fault.sepc = sepc;
+        expected_fault.stval = stval;
+        expected_fault.resume = resume;
+        expected_fault.observed_cause = 0;
+        expected_fault.observed_sepc = 0;
+        expected_fault.observed_stval = 0;
+        __asm__ volatile("" ::: "memory");
+        expected_fault.armed = true;
+}
+
+bool arch_fault_result(u64 *cause, u64 *sepc, u64 *stval)
+{
+        __asm__ volatile("" ::: "memory");
+        if (cause != 0)
+                *cause = expected_fault.observed_cause;
+        if (sepc != 0)
+                *sepc = expected_fault.observed_sepc;
+        if (stval != 0)
+                *stval = expected_fault.observed_stval;
+        return expected_fault.seen && !expected_fault.armed;
+}
 
 static void halt(void)
 {
@@ -75,16 +122,55 @@ static void timer_set(u64 when)
 /*
  * 下一次性比较值由上一次推算，不读 mtime：省下一次 SBI 调用，
  * 也让节拍间隔不受中断响应延迟影响。
+ * tick_cycles 是当前的节拍宽度：额定值 ARCH_TICK_CYCLES，
+ * 中断风暴测试经 arch_timer_hz() 临时调小、再恢复。
  */
 static u64 next_cmp;
+static u64 tick_cycles = ARCH_TICK_CYCLES;
+
+void arch_timer_hz(u32 hz)
+{
+        if (hz == 0)
+                hz = 1;
+        if ((u64)hz > ARCH_TIME_HZ)
+                hz = (u32)ARCH_TIME_HZ;
+
+        tick_cycles = ARCH_TIME_HZ / hz;
+        if (tick_cycles == 0)
+                tick_cycles = 1;
+
+        /* 让新宽度立即生效：从「现在」重新装订一次。 */
+        next_cmp = arch_time() + tick_cycles;
+        timer_set(next_cmp);
+}
 
 void arch_timer_init(u64 hart)
 {
         (void)hart;                     /* 单 hart 运行，SBI 调用隐式使用它 */
 
-        /* 陷阱向量必须先装好，再打开中断 */
-        u64 vec = (u64)(unsigned long)trap_entry;
-        __asm__ volatile("csrw stvec, %0" :: "r"(vec));
+        /*
+         * 静态初值必须在引导清零之后仍然存在。
+         *
+         * riscv64 的 .data 与 .bss 共处一个输出段；早先 __bss_start 被定义
+         * 在 .data 的开头，boot.S 的清零循环于是把整个 .data 的初值抹掉。
+         * 这类缺陷平时无声，只有在「真的存在非零初值」时才显形：
+         * tick_cycles 被清零后节拍宽度为 0，截止时刻永不过期，
+         * 中断变成无限风暴，主循环被彻底饿死。
+         * 因此这里显式核对一次，并把结论打印成门禁可抓的标记。
+         */
+        if (tick_cycles != ARCH_TICK_CYCLES) {
+                arch_puts("  !! .data initializer lost: tick_cycles = ");
+                arch_putdec(tick_cycles);
+                arch_puts(" (expected ");
+                arch_putdec(ARCH_TICK_CYCLES);
+                arch_puts(")\n");
+                tick_cycles = ARCH_TICK_CYCLES;  /* 先让系统能跑，错误已报出 */
+        } else {
+                arch_puts("  ok   .data initializer survived boot\n");
+        }
+
+        /* 陷阱向量必须先装好，再打开中断。 */
+        arch_trap_init();
 
         next_cmp = arch_time() + ARCH_TICK_CYCLES;
         timer_set(next_cmp);
@@ -112,22 +198,41 @@ u64 arch_ticks(void)
 /*
  * 由 traps.S 调用。scause 最高位为 1 表示中断，否则为异常。
  */
-void trap_dispatch(u64 scause, u64 sepc, u64 stval)
+u64 trap_dispatch(u64 scause, u64 sepc, u64 stval)
 {
         if (scause & SCAUSE_INT) {
                 u64 code = scause & SCAUSE_CODE;
 
                 if (code == IRQ_S_TIMER) {
                         tick_count++;
-                        next_cmp += ARCH_TICK_CYCLES;
+                        next_cmp += tick_cycles;
                         timer_set(next_cmp);
-                        return;
+                        return sepc;
                 }
 
                 arch_puts("\n!! unexpected interrupt, code = ");
                 arch_putdec(code);
                 arch_puts("\n");
                 halt();
+        }
+
+        if (expected_fault.armed) {
+                expected_fault.observed_cause = scause;
+                expected_fault.observed_sepc = sepc;
+                expected_fault.observed_stval = stval;
+
+                if (scause == expected_fault.cause &&
+                    sepc == expected_fault.sepc &&
+                    stval == expected_fault.stval) {
+                        u64 resume = expected_fault.resume;
+                        expected_fault.armed = false;
+                        expected_fault.seen = true;
+                        __asm__ volatile("" ::: "memory");
+                        return resume;
+                }
+
+                arch_puts("\n!! expected MMU fault mismatch");
+                expected_fault.armed = false;
         }
 
         arch_puts("\n!! CPU exception\n  scause = 0x");
@@ -139,4 +244,5 @@ void trap_dispatch(u64 scause, u64 sepc, u64 stval)
         arch_puts("\n");
 
         halt();
+        return sepc;
 }

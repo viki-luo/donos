@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * linker.ld — x86_64 内核链接脚本（PVH 引导）
  *
@@ -41,11 +42,18 @@ SECTIONS
         } :note
 
         .text : ALIGN(4K) {
+                __text_start = .;
                 *(.text .text.*)
+                . = ALIGN(4K);
+                __text_end = .;
+                __rodata_start = .;
         } :text
 
         .rodata : ALIGN(4K) {
                 *(.rodata .rodata.*)
+                . = ALIGN(4K);
+                __rodata_end = .;
+                __data_start = .;
         } :rodata
 
         /*
@@ -65,6 +73,9 @@ SECTIONS
                 /* 栈放在最后，向下增长，永远不会撞到上面的数据 */
                 . = ALIGN(16);
                 *(.bootstack)
+                . = ALIGN(4K);
+                __stack_top = .;
+                __data_end = .;
         } :data
 
         /DISCARD/ : {

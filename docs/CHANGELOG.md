@@ -10,6 +10,16 @@
 
 ## [Unreleased] / 未发布
 
+### Changed / 变更 — **项目更名为 DONos**
+
+- **项目名从 liteOS 改为 DONos**：改名覆盖三种形态 —— 正文 `liteOS` → `DONos`、宏与头文件保护 `LITEOS_*` → `DONOS_*`（含 `DONOS_SELFTEST`）、镜像名 `liteos.bin` → `donos.bin`。涉及 42 个文件：源码、链接脚本、Makefile、`tools/*.sh`、`.github/workflows/*.yml`、`CITATION.cff`、`LICENSE` 首行与全部中英文文档。全库已核对无旧名残留。**注意**：`DONos` 与华为的 `LiteOS` 无关，改名同时消除了这一名称撞车
+  / **the project is renamed from liteOS to DONos**: the rename covers three forms — prose `liteOS` → `DONos`, macros and header guards `LITEOS_*` → `DONOS_*` (including `DONOS_SELFTEST`), and the image name `liteos.bin` → `donos.bin`. It touches 42 files: sources, linker scripts, the Makefile, `tools/*.sh`, `.github/workflows/*.yml`, `CITATION.cff`, the first line of `LICENSE` and every bilingual document. The tree was checked for leftovers and none remain. **Note**: `DONos` is unrelated to Huawei's `LiteOS`; the rename also removes that name collision
+
+### Changed / 变更 — **许可证：MIT → GPL-2.0-only**
+
+- **项目许可证改为 GPL-2.0-only，并给每个源文件加上机器可读的 SPDX 标识**：`LICENSE` 现在是 GNU GPL v2 全文；全部 64 个源文件（`.c`/`.h`/`.asm`/`.S`/`.ld`/`.sh`/`Makefile`）首行都带 `SPDX-License-Identifier: GPL-2.0-only`，`.sh` 保留 shebang 在首行。`README` 徽章与 `CITATION.cff` 的 `license` 字段同步。**这是实质性变更**：GPL-2.0-only 是强著性许可，分发衍生作品必须以同一许可提供完整源码，不能再改为闭源。新增门禁 `make check-spdx` 逐文件断言标识存在、且与 `LICENSE` 一致 —— 只写在 README 里的一句话挡不住「某个文件被单独拿走时没有任何许可证信息」这个真实风险
+  / **the project licence changes from MIT to GPL-2.0-only, with a machine-readable SPDX tag in every source file**: `LICENSE` now carries the full GNU GPL v2 text, and all 64 source files (`.c`/`.h`/`.asm`/`.S`/`.ld`/`.sh`/`Makefile`) start with `SPDX-License-Identifier: GPL-2.0-only` (scripts keep the shebang on line 1). The README badge and the `CITATION.cff` licence field were updated too. **This is a substantive change**: GPL-2.0-only is a copyleft licence, so derived works must ship complete source under the same licence and can no longer be closed. The new `make check-spdx` gate asserts the tag per file and that it agrees with `LICENSE` — a sentence in the README cannot prevent the real risk of a single file being taken away with no licence information at all
+
 ### Changed / 变更 — **破坏性：事件结构与 `motion[]` 语义**
 
 - **`motion[]` 的量纲冻结**（设计决定 18）：此前 `motion` 的含义随物件而定，
@@ -40,9 +50,164 @@
   wrapping endpoints and events from the future are all `MOTION_E_INVAL`
 - **`motion_event_t` 增加 `issued_at_ns` 字段**：结构体成员增至 6 个
   / **`motion_event_t` gains `issued_at_ns`**: six members instead of five
+- **一个接口签名变更**：`void object_set_state(...)` → `bool object_set_state(...)`。
+  姿态在入口校验，非法姿态整份拒绝，调用者必须能知道
+  / **one signature change**: `void object_set_state(...)` becomes
+  `bool object_set_state(...)`. The pose is validated on entry and an invalid
+  pose is refused as a whole, so the caller has to be able to learn that
+- **一个解算接口的返回类型变更**：`bool object_resolve(...)` →
+  `object_resolve_status_t object_resolve(...)`。断链、成环、链过深、算术溢出
+  从此可以区分；注意 `OBJECT_RESOLVE_OK` 为 0，因此**不能**再把返回值直接
+  当真值使用
+  / **one return-type change**: `bool object_resolve(...)` becomes
+  `object_resolve_status_t object_resolve(...)`. A broken frame, a cycle, an
+  over-long chain and arithmetic overflow are now distinguishable; note that
+  `OBJECT_RESOLVE_OK` is 0, so the result must **not** be used as a boolean
+- **一个查询接口重命名**：`object_is_still(wire)` →
+  `object_commanded_is_zero(wire)`。旧名字错误暗示它判断世界中的实际静止；
+  实际上它只读取相对 `frame` 的当前命令。参照系本身运动时，命令为零的物件
+  在世界中仍然运动
+  / **one query API rename**: `object_is_still(wire)` becomes
+  `object_commanded_is_zero(wire)`. The old name incorrectly implied measured
+  stillness in the world; the query only reads the current command relative to
+  `frame`. An object with a zero command still moves in the world when its frame
+  moves
+- **一个接口签名变更**：`void object_describe(...)` →
+  `bool object_describe(...)`。申报可能被校验拒绝，调用者必须能知道 ——
+  静默拒绝正是死字段的来源
+  / **one signature change**: `void object_describe(...)` becomes
+  `bool object_describe(...)`. A description can now be refused by validation
+  and the caller has to be able to learn that — a silent refusal is exactly how
+  dead fields are born
+- **两个接口签名变更**：`base_apply(const motion_event_t *)` →
+  `base_apply(u64 now_ns, const motion_event_t *)`；
+  `u32 object_run(u64 now_ns)` → `object_run_status_t object_run(u64 now_ns, u32 *stepped)`。
+  调用者必须提供提交时刻，并检查执行层是否接受了这个时刻；新增只读
+  `u64 object_now_ns(void)` 供调用者在同一条时间轴上取「现在」
+  / **two signature changes**: `base_apply(const motion_event_t *)` becomes
+  `base_apply(u64 now_ns, const motion_event_t *)`, and
+  `u32 object_run(u64 now_ns)` becomes
+  `object_run_status_t object_run(u64 now_ns, u32 *stepped)`. Callers must
+  supply the submission instant and check whether the execution layer accepted
+  it; a read-only `u64 object_now_ns(void)` lets a caller read "now" on that
+  same timeline
 
 ### Fixed / 修复
 
+- **世代号回绕让旧句柄复活**：接线表每个槽位的世代号到达 `0xFFFFFFFF` 后，上一次实现的「回绕成 0 就改回 1」会造出与**第一次使用**完全相同的句柄，旧大脑缓存的接线从此指向一个陌生物件；1 kHz 热插拔下约 50 天就会发生。现在世代号耗尽的槽位**永久退役**，分配器不再从它发号，句柄绝不复用
+  / **generation wraparound resurrected old handles**: once a wiring-table slot's generation reached `0xFFFFFFFF`, the old "wrap to 0, force back to 1" logic minted a handle identical to the **first-ever** use, so a brain caching that wire suddenly addressed a stranger; at 1 kHz hot-plug this takes about 50 days. A slot whose generation is exhausted now **retires permanently**, the allocator issues no further handles from it, and a handle is never reused
+- **热插拔时命令可能进了错误的参照系**：`object_plug()` 先把接线发布出去再初始化其余字段，而 `find_by_wire()` 只认接线字段 —— 窗口里命令会被接受，却按**上一个占用者**的 frame、周期与速率上限判定。现在接线是最后一个被写入的字段，可见即就绪；`object_unplug()` 也先置不可见再交还接线
+  / **a command could enter the wrong frame during hot-plug**: `object_plug()` published the wire before initialising the rest, and `find_by_wire()` matches on the wire fields alone — a command accepted in that window was judged by the **previous occupant's** frame, period and rate limit. The wire is now the last field written, visible-means-ready; `object_unplug()` likewise makes the object invisible before returning the wire
+- **非单位四元数被当作旋转使用**：`object_set_state()` 接受任意姿态，
+  `rotate3()` 只把**全零**四元数当作「无旋转」。于是 (2,0,0,0) 或 (1,1,0,0)
+  这样的输入会被当成合法旋转，把向量缩放两倍或 √2 倍 —— 错误表现成精度问题。
+  现在姿态在入口按 `|q|² = 1 ± 1/1024` 校验，非法姿态**整份拒绝**、一个字段
+  都不写入；全零仍表示「未申报姿态」，按无旋转处理，因为「还没上报」不是
+  「报了错的」
+  / **non-unit quaternions were used as rotations**: `object_set_state()`
+  accepted any orientation and `rotate3()` treated only the **all-zero**
+  quaternion as "no rotation". An input like (2,0,0,0) or (1,1,0,0) was taken
+  as a valid rotation and scaled vectors by 2 or by sqrt(2) — an error that
+  disguises itself as precision loss. A pose is now validated on entry against
+  `|q|^2 = 1 +/- 1/1024` and an invalid one is **refused as a whole**, writing no
+  field at all; all-zero still means "no pose declared" and maps to no rotation,
+  because "not reported yet" is not "reported something wrong"
+- **成环与「链过深」共用同一个失败**：`object_resolve()` 只用
+  `depth >= OBJECT_FRAME_DEPTH_MAX` 一个判定，于是一条合法但较长的链会被
+  报成环，而真实成环与「需要缩短链」两种现场无法区分。现在记下走过的接线，
+  重复出现才是 `OBJECT_RESOLVE_E_CYCLE`；超过深度上限是
+  `OBJECT_RESOLVE_E_DEPTH`；断链、目标不存在、空指针、算术溢出各有独立状态
+  / **cycles and "chain too deep" shared one failure**: `object_resolve()` used
+  a single `depth >= OBJECT_FRAME_DEPTH_MAX` test, so a legal but long chain was
+  reported as a cycle, and the two situations needed different fixes but looked
+  identical. Visited wires are now recorded and only a repeat reports
+  `OBJECT_RESOLVE_E_CYCLE`; exceeding the limit reports
+  `OBJECT_RESOLVE_E_DEPTH`; a broken frame, a missing target, a null pointer and
+  arithmetic overflow each have their own status
+- **命令、世界解算与实测状态混为一体**：执行层此前把
+  `object_resolve()` 得到的世界速度积分进相对 `frame` 的 `state.position`，
+  参照系自身的位移会凭空变成物件自己的相对位移；`state.linear` 与
+  `state.angular` 又从未由执行层更新。现在内部命令明确保存为 `cmd_motion`，
+  执行层只积分本物件相对 `frame` 的命令速度并更新实测速度字段，世界视角只由
+  `object_resolve()` 返回，不写回本地状态
+  / **command, world resolution, and measured state were conflated**: the
+  executor integrated the world velocity returned by `object_resolve()` into a
+  `state.position` relative to `frame`, causing the frame's displacement to
+  become the object's own relative displacement; `state.linear` and
+  `state.angular` were never updated. Commands are now held explicitly as
+  `cmd_motion`; the executor integrates only the object's command relative to
+  `frame` and updates measured velocity fields, while the world view is returned
+  only by `object_resolve()` and never written back into local state
+- **刚体速度解算遗漏 `ω × r`**：旧实现只旋转并相加线速度和角速度，挂在
+  自转参照系半径 `r` 处的物件不会获得切向速度。现在逐级旋转线速度、角速度
+  与实测相对位置，并以 checked Q32.32 算术加入 `ω_F × r`；参照系原点位移
+  也随链上移，避免更高层围绕错误原点旋转
+  / **rigid-body twist resolution omitted `omega x r`**: the old code only
+  rotated and added linear and angular velocities, so an object at radius `r`
+  on a rotating frame acquired no tangential velocity. Resolution now rotates
+  linear velocity, angular velocity, and measured relative position at each
+  level, adds `omega_F x r` with checked Q32.32 arithmetic, and carries frame
+  origins upward so higher levels rotate about the correct origin
+- **`object_set_state()` 保留旧轨迹的积分余数**：外部改写位姿后，下一条轨迹
+  会继承改写前尚未补齐的 sub-LSB 零头，使相同新位姿和相同新命令因历史不同
+  得出不同结果。现在改写状态时清空三个 `carry` 分量
+  / **`object_set_state()` kept the previous trajectory's integration carry**:
+  after an external pose write, the next trajectory inherited sub-LSB remainder
+  from the old one, making identical new pose and command depend on history.
+  All three carry components are now cleared when state is written
+- **事件的 `dof` 尾部会进入模型并顺参照链累加**：`object_submit()` 照抄
+  全部 6 个 `motion[]` 分量，而事件只声明了前 `dof` 个 —— 尾部可能是上一条
+  命令的残值或未初始化的栈内容。`object_resolve()` 又按 6 轴累加参照链，
+  于是一个 `dof = 1` 的物件能把自己「没被命令的角速度」加进子物件的世界
+  运动。现在接受时把 `dof` 之外的分量归零：声明之外的字段不进入模型
+  / **the `dof` tail entered the model and accumulated along the frame chain**:
+  `object_submit()` copied all six `motion[]` components while an event declares
+  only the first `dof`. The tail could hold the previous command's leftovers or
+  uninitialised stack content, and `object_resolve()` accumulated all six axes
+  along the chain — so a `dof = 1` object could add angular velocity it was
+  never commanded into a child's world motion. The components outside `dof` are
+  now zeroed on acceptance: what was not declared does not enter the model
+- **能力申报来者不拒，且申报过的 `max_rate` 从不被检查**：`object_describe()`
+  接受 `dof > MOTION_DOF_MAX`、区间反向（`limit_min > limit_max`）、负速率与
+  负质量；`object_capability()` 随后把它们原样返回。申报的速率上限在任何
+  代码路径上都不产生效果，等于又一处死字段。现在申报会被校验，非法申报
+  **整体拒绝且不留半份记录**（`object_capability()` 继续返回 `false`）；
+  `dof` 之外的轴清零；命令超出已申报的非零 `max_rate` 时返回新增的
+  `MOTION_E_LIMIT`。幅值判定对 `INT64_MIN` 单独处理，避免取负溢出绕过闸门
+  / **capability declarations were accepted unchecked, and a declared
+  `max_rate` was never enforced**: `object_describe()` accepted
+  `dof > MOTION_DOF_MAX`, inverted intervals, and negative rates or mass, and
+  `object_capability()` handed them straight back. A declared rate limit had no
+  effect on any code path — another dead field. Descriptions are now validated
+  and an invalid one is **refused as a whole, leaving no partial record**
+  (`object_capability()` keeps returning `false`); axes outside `dof` are
+  zeroed; and a command exceeding a declared non-zero `max_rate` returns the new
+  `MOTION_E_LIMIT`. The magnitude test handles `INT64_MIN` separately so that
+  negating it cannot slip past the gate
+- **Q32.32 算术未定义行为**：速度积分此前直接计算有符号 64 位
+  `velocity * period_ns + carry`。例如 Q32.32 的 3 m/s 乘 1 秒周期得到
+  `12,884,901,888,000,000,000`，超过 `INT64_MAX`，会进入 C 有符号溢出
+  未定义行为。新增 `base/fixed.c` checked 算术层；速度积分先把速度分成
+  整数项与绝对值小于 `1e9` 的余数项，分别计算后合并，不使用 128 位除法，
+  也不引入 `__divti3`。加、减、乘二、Q32.32 乘法、参照链累加、四元数
+  旋转与位置累计全部改为显式报告溢出；单步三个位置轴先在临时值中完成，
+  任一轴失败时不提交半步状态
+  / **undefined behavior in Q32.32 arithmetic**: velocity integration directly
+  evaluated signed 64-bit `velocity * period_ns + carry`. At 3 m/s in Q32.32
+  and a one-second period, the product is `12,884,901,888,000,000,000`, beyond
+  `INT64_MAX`, invoking signed-overflow UB. A checked arithmetic layer now
+  decomposes velocity into a whole term and a remainder below `1e9`, avoiding
+  both signed overflow and 128-bit division helpers. Checked add, subtract,
+  double, Q32.32 multiply, frame accumulation, quaternion rotation and position
+  accumulation now fail explicitly; all position axes commit atomically only
+  after the complete step succeeds
+- **宿主边界测试与 UBSan 陷阱门禁**：新增 `make host-test` 与
+  `make sanitize`，覆盖 `INT64_MIN/MAX`、3 m/s × 1 s、carry 边界、周期上界、
+  正负 Q32.32 乘法和 1 ms/3 ms 余数进位等价性
+  / **host boundary tests and UBSan trap gate**: `make host-test` and
+  `make sanitize` cover `INT64_MIN/MAX`, 3 m/s × 1 s, carry boundaries, the
+  period limit, signed Q32.32 multiplication, and 1 ms/3 ms remainder-carry
+  equivalence
 - **`make check` 的失败门禁一直是空转**：自检行 `failures = N` 与压力测试行
   `bench failures = N` 两处匹配用的都是无限定子串，`failures = 1` 会命中
   `bench failures = 0` 里包含的 `failures = 0`，于是 **自检有任何失败，整个门禁
@@ -67,21 +232,172 @@
   now uses **remainder carry**: the sub-bit remainder lives on the object side
   in `carry[3]` and is applied to the next step, so paths with different periods
   give bit-identical results
-- **`object_plug()` 拒绝超长周期**：`OBJECT_PERIOD_NS_MAX`（1 s）之上的申报
-  会让 64 位积分溢出，改为在到达时拒绝而不是静默截断
-  / **`object_plug()` refuses over-long periods**: declarations above
-  `OBJECT_PERIOD_NS_MAX` (1 s) would overflow the 64-bit integration; now
-  refused on arrival instead of silently truncated
+- **`object_plug()` 拒绝超长周期**：`OBJECT_PERIOD_NS_MAX`（1 s）为执行模型
+  给出明确上界；算术安全不再依赖该上界，而由 checked fixed-point 层独立保证
+  / **`object_plug()` refuses over-long periods**: `OBJECT_PERIOD_NS_MAX`
+  (1 s) is an explicit execution-model bound; arithmetic safety no longer
+  relies on it and is enforced independently by the checked fixed-point layer
+- **新鲜度判定用的是上一次 `object_run` 的旧节拍**：`object_submit()` 读的
+  「现在」是执行时钟 `exec_now_ns`，只在 `object_run()` 里更新。两次运行之间
+  提交的命令，无论实际迟到多久，看到的都是同一个过期时刻 —— 一个早该过期的
+  命令可以无限期地被接受，而一个刚刚发出的命令却可能被判为「发出于未来」。
+  现在提交时刻由调用者显式给出：`base_apply(now_ns, ev)` /
+  `object_submit(w, now_ns, ev)`；基座不保存它，物件也不缓存它
+  / **freshness judged against a stale execution beat**: `object_submit()`
+  read `exec_now_ns`, which only `object_run()` ever updated — so every command
+  submitted between two runs was judged against the same obsolete instant.
+  A command could be accepted long after it should have expired. The submission
+  instant is now an explicit argument: `base_apply(now_ns, ev)` and
+  `object_submit(w, now_ns, ev)`; neither the base nor the object stores it
+- **执行时钟可回退**：`object_run(now_ns)` 此前不检查 `now_ns` 是否小于
+  上一次的值，回退时每个物件仍会各走一步，时间上「倒退」了而
+  运动上「前进」了。现返回 `object_run_status_t`，回退返回
+  `OBJECT_RUN_E_CLOCK_ROLLBACK` 且**不推进任何物件**
+  / **the execution clock could run backwards**: `object_run(now_ns)` never
+  compared `now_ns` with the previous instant, so a rollback still stepped
+  every object — time went back, motion went forward. It now returns
+  `object_run_status_t` and refuses a rollback with
+  `OBJECT_RUN_E_CLOCK_ROLLBACK` without advancing any object
+- **调度时间加法回绕**：`now_ns + period_ns` 与 `next_due_ns + period_ns`
+  直接相加，接近 `UINT64_MAX` 时会回绕成一个很小的值，下一次到期就落在过去，
+  运动环退化为「每拍都跑」。现全部经 `time_add_checked()`，回绕返回
+  `OBJECT_RUN_E_TIME_OVERFLOW`，并以**两遍制**提交：第一遍只算排期，
+  第二遍才写状态，因此失败不会留下前半张表已推进的状态
+  / **scheduling additions wrapped around**: `now_ns + period_ns` and
+  `next_due_ns + period_ns` were plain additions; near `UINT64_MAX` they
+  wrapped to a tiny value, putting the next due instant in the past and
+  degenerate a motion loop into "step on every call". Both now go through
+  `time_add_checked()` and report `OBJECT_RUN_E_TIME_OVERFLOW`. Commit is
+  two-phase — the first pass only computes deadlines, the second writes state —
+  so a refusal cannot leave half the table advanced
+- **物件首次被看见时凭空积分一个周期**：`next_due_ns == 0` 的物件被当作
+  「已到期」，插上就立刻走一步，位置里因此多出一段从未经过的时间（约
+  100 Hz 下 3 m/s 即 3 cm 的免费位移）。首次现在只排期，不积分
+  / **an object was integrated for free the first time it was seen**: a
+  `next_due_ns == 0` object counted as due and stepped immediately at plug-in.
+  The first sighting now only schedules; it does not integrate
+- **实机循环混用两条时间轴**：`kmain.c` 把 `arch_ticks() * NS_PER_TICK`
+  直接喂给执行层，而自检/基准已把执行时钟推到 500 ms 之后。ARCH 节拍计数从
+  0 起，两个时间轴一错位就是一次**真实的时间回退**，执行层正确地拒绝它，
+  物件从此不再前进。新增只读 `object_now_ns()`，实机循环改为在其上加
+  本循环实测的节拍增量，提交时刻同样取自执行层时间轴
+  / **two different timelines mixed in the live loop**: `kmain.c` fed
+  `arch_ticks() * NS_PER_TICK` straight to the execution layer, while
+  verification and benchmarks had already pushed the execution clock past
+  500 ms. The ARCH tick counter starts at zero, so the mismatch is a **real
+  time rollback**; the new guard correctly refused it, and nothing moved
+  again. A read-only `object_now_ns()` was added and the live loop now advances
+  the execution clock by the measured tick delta; submission instants come from
+  that same timeline
 
 ### Added / 新增
 
+- **发布镜像不再含证据代码，并新增 `check-slim` 门禁**（设计决定 34）：`make` 构建**发布镜像**（`SELFTEST=0`，默认），`make SELFTEST=1` 构建**证据镜像**，输出到 `build/<arch>/` 与 `build/<arch>/selftest/` 互不覆盖。发布镜像不链接 `verify.c`、`bench.c`、`brain_verify.c`、`monitor_verify.c`、`mmu_verify.c` 与故障探针。**装保护与验证被拆开**：x86_64 的 NX / 4 KiB 拆分 / WP 与 riscv64 的 Sv39 建表移入无条件路径 `arch_mmu_enable()` / `arch_mmu_init()`，自检只验证同一条路径的结果 —— 否则「自检通过」只证明自检版本的隔离。`make check-slim` 断言发布镜像无自检符号、体积更紧、能启动并跑完 live 演示。实测 x86_64 代码段 69,632 → 24,576 字节、加载体积 208,608 → 135,188；riscv64 代码段 53,248 → 16,384、加载体积 139,360 → 73,816。`make check` 仍跑全部 13 部分自检与长期运行/中断风暴
+  / **the release image no longer carries evidence code, gated by `check-slim`** (decision 34): `make` builds the **release image** (`SELFTEST=0`, the default) and `make SELFTEST=1` builds the **evidence image**, in `build/<arch>/` and `build/<arch>/selftest/` so neither overwrites the other. The release image does not link `verify.c`, `bench.c`, `brain_verify.c`, `monitor_verify.c`, `mmu_verify.c` or the fault probes. **Installing protection is separated from verifying it**: x86_64's NX, 4 KiB split and WP and riscv64's Sv39 table build moved onto the unconditional path `arch_mmu_enable()` / `arch_mmu_init()`, and the self-test only verifies that same path's result — otherwise "the self-test passes" would only prove the isolation of the self-test build. `make check-slim` asserts no self-test symbols, a tighter size budget, and that the image boots and completes the live demonstration. Measured: x86_64 text 69,632 → 24,576 bytes and load size 208,608 → 135,188; riscv64 text 53,248 → 16,384 and load size 139,360 → 73,816. `make check` still runs all 13 self-test sections plus endurance and interrupt-storm
+- **x86_64 完整 W^X：2 MiB 大页拆成 4 KiB 页**（设计决定 33）：`arch_mmu_split_kernel()` 在 `0x73000` 建 4 KiB 页表替换 `PDE[0]`，按段赋权 —— `.text` = R|X、`.rodata` = R、`.data`/`.bss`/栈 = R|W、低 1 MiB（页表与 PVH 引导信息）= R|W，其余地址不建立映射。链接脚本新增段边界符号。**证据是内核自己段上的两条真实违规**：写 `.text` 得到 #PF `error=0x03`（CR2=0x101000），从 `.data` 取指得到 `error=0x11`（CR2=0x123d20），两者之后均恢复正常执行。至此两架构都做到完整 W^X，不再是「部分 NX」
+  / **x86_64 full W^X: the 2 MiB page split into 4 KiB pages** (decision 33): `arch_mmu_split_kernel()` builds a 4 KiB page table at `0x73000` and installs it as `PDE[0]`, assigning permissions per section — `.text` = R|X, `.rodata` = R, `.data`/`.bss`/stack = R|W, the low 1 MiB (page tables and PVH boot information) = R|W, and every other address unmapped. The linker script now exports section boundaries. **The evidence is two real violations against the kernel's own sections**: a write to `.text` gives #PF `error=0x03` (CR2=0x101000) and an instruction fetch from `.data` gives `error=0x11` (CR2=0x123d20), with normal execution resuming after both. Both architectures now reach full W^X rather than a partial NX
+- **并发模型显式声明与单核门禁**（`make check-single-core`）：把「目前只支持单核」从形容词变成可证伪的事实。门禁断言三件事 —— 源码中不出现 `__atomic`/`_Atomic`/`spinlock`/`mutex`/`memory_order`/`__sync_` 等并发原语；两架构中断入口（`idt.c`/`isr.asm`/`trap.c`/`traps.S`）不调用 `object_run`/`base_apply`/`object_step`；中英文设计文档都含并发模型章节。设计文档新增 §9 说明四条具体含义与进入 SMP 的前置条件。**可证伪性实测**：注入 `_Atomic` 或在 riscv 定时器中断里调用 `object_run`，门禁分别报红并指出文件名与行号
+  / **explicit concurrency model with a single-core gate** (`make check-single-core`): turns "single-core only" from an adjective into a falsifiable fact. The gate asserts three things — no concurrency primitive (`__atomic`, `_Atomic`, `spinlock`, `mutex`, `memory_order`, `__sync_`) appears in the sources; the interrupt entry points on both architectures (`idt.c`, `isr.asm`, `trap.c`, `traps.S`) never call `object_run`, `base_apply` or `object_step`; and both design documents carry a concurrency-model section. A new §9 records the four concrete meanings and the prerequisites for entering SMP. **Falsifiability measured**: injecting `_Atomic`, or calling `object_run` from the riscv timer interrupt, turns the gate red with the offending file and line
+- **长期运行、中断风暴与监视处置证据**（`base/bench.c`，双架构门禁标记 `endurance ticks` / `storm ticks`）：1000 个调度节拍（10 s 执行层时间）同时进行 1000 次监视轮询，期望值全部从余数进位的精确模型手算 —— 3 m/s 跑 10 s 精确落在 30 m、限位轴精确停在 +4 m 且其后 600 拍整步拒绝、姿态经 1000 次归一化后仍是单位四元数、第 300 拍拔线后故障恰好上报一次而幸存者被注视到最后一拍。中断风暴把节拍临时升到 8000 Hz，判据是「突发耗掉的计数远小于额定频率跑同样拍数的当量」（8 倍余量，仍与「频率没变」相差 10 倍），随后确认节拍频率与执行层都恢复
+  / **endurance, interrupt-storm and monitor-disposition evidence** (`base/bench.c`, gate markers `endurance ticks` / `storm ticks` on both architectures): 1,000 scheduled ticks (10 s of execution-layer time) run alongside 1,000 monitor polls, with every expectation hand-derived from the exact carry model — 3 m/s for 10 s lands exactly on 30 m, the limited axis holds exactly at +4 m and refuses the following 600 steps, the pose is still a unit quaternion after 1,000 renormalisations, and the wire pulled at tick 300 is reported exactly once while the survivor stays watched to the last poll. The storm temporarily lifts the tick rate to 8000 Hz; the criterion is that the burst consumes far fewer counts than the nominal rate would need for the same tick count (8× headroom, still 10× below "the rate never changed"), and both the tick rate and the execution layer must recover afterwards
+- **修复 riscv64 静态初值被引导清零抹掉**（设计决定 32）：`.data` 与 `.bss` 共用一个输出段时，`__bss_start` 曾被定义在 `.data` 开头，`boot.S` 的清零循环因此抹掉所有非零静态初值。第一次显形是节拍宽度被清零导致的无限中断风暴（45 秒内节拍数从 4 千涨到 700 万，主循环饿死）。链接脚本现把零初始化区独立标出，`arch_timer_init()` 显式核对初值仍存在并打印门禁可抓的标记；把升频原语改成空操作会让风暴判据立刻报红
+  / **fix: riscv64 static initialisers were erased by the boot clear** (decision 32): with `.data` and `.bss` sharing one output section, `__bss_start` was defined at the start of `.data`, so the zeroing loop in `boot.S` wiped every non-zero static initialiser. It first showed up as an infinite interrupt storm caused by a zeroed tick width (tick count grew from four thousand to seven million in 45 seconds while the main loop starved). The linker script now marks the zero-initialised region separately and `arch_timer_init()` verifies the initial value survived, printing a gate-readable marker; turning the frequency primitive into a no-op turns the storm criterion red immediately
+
+- **角速度积分到姿态与行程限位策略**（设计决定 31）：dof=6 命令的角分量按 `q̇ = ½ ω ⊗ q` 积分进姿态并逐步归一化（ω 按参照系坐标表达，与 `object_resolve` 沿链旋转命令角速度的约定一致；归一化用保符号的整数平方根）。申报了 `[limit_min, limit_max]`（两者不同时为 0）的轴在积分处生效：越界拒绝整步，物件停在最后一次界内位置，被拒的步仍计入执行。任一轴积分溢出或归一化失败同样整步拒绝。新增宿主门禁 `tests/host/test_quat.c`（期望值全部手算，含经 `object_run` 的端到端旋转与限位拒绝），接入 `make host-test` 与 `make sanitize`
+  / **angular rate integrated into attitude with a travel-limit policy** (decision 31): the angular components of a dof=6 command integrate into the attitude as `q̇ = ½ ω ⊗ q` with per-step renormalisation (ω expressed in frame coordinates, matching how `object_resolve` rotates commanded angular velocity along the chain; normalisation uses a sign-preserving integer square root). A declared `[limit_min, limit_max]` (not both zero) binds during integration: a crossing refuses the whole step, the object holds at its last in-range position, and refused steps still count as executed. Integration overflow or failed normalisation refuses the step as well. New host gate `tests/host/test_quat.c` (all expectations hand-computed, including end-to-end rotation and limit refusal through `object_run`), wired into `make host-test` and `make sanitize`
+
+- **两架构真实 MMU 违规访问故障注入**：x86_64 的只读写入触发 error=0x03、NX 页取指得到 0x11，CR2 与保存 RIP 精确匹配后恢复；riscv64 的 R-only 写入得到 scause=15，RW/NX 页取指得到 scause=12，按精确 sepc/stval 恢复。页表位断言不再被冒充为硬件拦截证据
+  / **real MMU fault injection on both architectures**: x86_64 verifies #PF 0x03 for read-only writes and 0x11 for NX instruction fetches with exact CR2/RIP matching; riscv64 verifies store fault 15 and instruction page fault 12 with exact stval/SEPC. Both recover to normal execution
+
+- **体积与静态内存预算门禁**：`tools/size.sh` 以 ELF 已分配段统一计算两个架构的加载体积，并分别统计静态 RAM、静态栈与页表占用；`make check-size` 对 x86_64 执行 224 KiB 加载体积、192 KiB 静态 RAM、64 KiB 栈预算，对 riscv64 执行 160 KiB、192 KiB、72 KiB 预算。避免依赖当前无法识别 riscv64 ELF 的宿主 `objcopy`
+  / **image and static-memory budget gate**: `tools/size.sh` uses allocated ELF sections for one cross-architecture load-size definition and separately accounts for static RAM, reserved stack and page tables. `make check-size` enforces x86_64 budgets of 224 KiB load size, 192 KiB static RAM and 64 KiB stack, and riscv64 budgets of 160 KiB, 192 KiB and 72 KiB, without depending on the host `objcopy` that cannot recognise the riscv64 ELF
+- **可重复的尾延迟门禁**：满表 `object_run` 逐次记录 2,000 个样本，输出平均值、p50、p99、p99.9、最大值与 2 的幂直方图。`tools/bench.sh` 使用 QEMU `-icount shift=0,align=off,sleep=off` 建立可重复的指令级回归基线；门禁要求 p99.9 小于一个 100 Hz 节拍的 50%，最大值小于 75%。普通 QEMU 的宿主调度离群值仍作为诊断信息，但不能冒充函数 WCET；真实硬件仍需单独验收
+  / **reproducible tail-latency gate**: a full-table `object_run` records 2,000 individual samples and reports average, p50, p99, p99.9, maximum and a power-of-two histogram. `tools/bench.sh` uses QEMU `-icount shift=0,align=off,sleep=off` for a reproducible instruction-level regression baseline; the gate requires p99.9 below 50% of one 100 Hz tick and maximum below 75%. Host-scheduling outliers from ordinary QEMU remain diagnostic evidence but are not presented as function WCET; real hardware still requires separate acceptance
+- **MMU 隔离的第一步**（双架构均带 `mmu failures = 0` 门禁标记）：x86_64 置位 EFER.NXE，把 2 MiB 以上的 511 个大页设为非可执行，并置位 CR0.WP（2 MiB 粒度限制下代码与数据仍同页，不是完整 W^X）；riscv64 建立 Sv39 页表，`.text` R|X、`.rodata` R、`.data`/`.bss`/栈 R|W，并映射 UART 与 PCIe 两个设备大页。仍无 U 态、无大脑沙箱
+  / **first step of MMU isolation** (both architectures, `mmu failures = 0` gate marker): x86_64 sets EFER.NXE, marks all 511 2 MiB pages above the kernel page non-executable, and sets CR0.WP (code and data still share page 0 at this granularity, so it is not full W^X); riscv64 builds Sv39 tables with .text R|X, .rodata R, .data/.bss/stack R|W and maps the UART and PCIe device windows. Still no user mode and no brain sandbox
+- **基座之外的安全监视器**（`monitor/`，双架构自检 + 宿主边界测试）：`monitor_poll()` 不再调用 `object_run()`，调用者先推进执行层，再把 `object_run_status_t` 交给监视器观察。监视器只读现场、产出事件，从不调用 `base_apply`、从不写物件状态。目标侧与宿主侧测试共同核对轮询前后物件状态、执行时钟和步数完全不变；新增 `INT64_MIN` 实测速率测试，越界比较不再通过取绝对值引入有符号溢出。接线非预期消失只报告一次即注销
+  / **out-of-base safety monitor** (per-architecture self-tests plus a host boundary test): `monitor_poll()` no longer calls `object_run()`; the caller advances execution and passes its `object_run_status_t` to the observer. The monitor reads the scene and emits events without calling `base_apply` or writing object state. Target and host tests require object state, the execution clock and the step count to remain unchanged across a poll. An `INT64_MIN` measured-rate case proves that the bound comparison no longer introduces signed overflow through absolute-value negation. Unexpected wire loss is reported once and then deregistered.
+- **上层大脑与大脑热切换**（`brain/`，双架构各 14 条自检 + 实机演示）：一个大脑只是「一条普通接线 + 决策周期 + 只读目标与当前时刻的决策函数」，`base/base.c` 里连 `brain` 这个词都被 `make check-purity` 禁止。两个控制律不同的大脑 `cruise`/`shuttle` 在运行 2 秒时热切换：新大脑读物件自持的实测位置做出反向决策（1.989 m → 1.490 m，恰为 -0.5 m/s × 1 s），**没有任何交接物**
+  / **upper brains and brain hot swap** (`brain/`, 14 assertions per architecture plus a live demonstration): a brain is just "an ordinary wire plus a decision period plus a decision function that reads only the target and the current instant", and the word `brain` is now forbidden inside `base/base.c` by `make check-purity`. Two brains with different control laws, `cruise` and `shuttle`, swap at two seconds: the new brain reads the object's own measured position and reverses (1.989 m to 1.490 m, exactly -0.5 m/s over 1 s), with **nothing handed over**
+- **确定性模糊语料**（`tests/host/fuzz_base.c`，`make fuzz`，默认 20 万轮）：固定种子、可复现，覆盖 8 类操作（插拔、命令、命令尾部、姿态、能力申报、调度、解算），不变量由影子表独立对账。**可证伪性已实测**：把两处已修复缺陷放回去，语料分别报出数千次与上千次失败；真实代码 20 万轮零失败。诚实边界写在 Flaky 之外：`object_plug()` 的发布顺序窗口在单线程下是等价变异体，语料抓不到，也不声称抓到
+  / **deterministic fuzz corpus** (`tests/host/fuzz_base.c`, `make fuzz`, 200k rounds by default): fixed seed, reproducible, covering 8 operation classes (plug, unplug, command, command tail, pose, capability, scheduling, resolve), with invariants cross-checked against a shadow table. **Falsifiability was measured**: putting two fixed defects back produced thousands and over a thousand failures respectively, while the real code passes 200k rounds. The honest limit is recorded too: the `object_plug()` publish-order window is an equivalent mutant under single-threaded execution, so the corpus cannot reach it and does not claim to
+- **接线世代纪律宿主白盒测试**（`tests/host/test_wire.c`，20 条）：直接包含 `base/base.c` 把接线表推到世代耗尽的边界，不再需要跑四十亿次热插拔；覆盖世代递增、复用不复活、耗尽即退役、全表耗尽报满、高地位别名拒绝、世代/槽位伪造拒绝、越界槽位拒绝、表满等
+  / **wiring-generations host white-box test** (`tests/host/test_wire.c`, 20 assertions): includes `base/base.c` directly to push the wiring table to the generation-exhaustion edge, avoiding four billion hot-plugs; covers increasing generations, reuse without resurrection, retirement on exhaustion, exhaustion reporting, high-bit alias rejection, generation/slot forgery rejection, out-of-range rejection, and a full table
+- **热插拔发布顺序验证段**（`base/verify.c` 第十三部分，双架构各 9 条）：旧占用者的命令数、位姿、能力申报、事件数与步数都不会泄漏到复用槽位的新占用者，新占用者带着自己声明的 unit 与周期出现
+  / **hot-plug publish-order section** (`base/verify.c`, part 13, 9 assertions per architecture): a reused slot's new occupant inherits none of the previous occupant's command, pose, capability, event count or step count, and appears with its own declared unit and period
+- **姿态合法性与解算成因验证段**（`base/verify.c` 第十二部分，双架构各 12 条）：
+  全零姿态被接受为「未申报」、(2,0,0,0) 被拒、(1,1,0,0) 被拒、`INT64_MAX`
+  分量被拒且不触发溢出、被拒姿态不扰动已有状态、合法单位四元数被接受并可读回、
+  死接线报 `NO_OBJECT`、空指针报 `INVAL`、离开的参照系报 `BROKEN_FRAME`、
+  两物件互指报 `CYCLE`、合法但过长的链报 `DEPTH` 而**不是** `CYCLE`
+  / **pose validity and resolve-failure section** (`base/verify.c`, part 12,
+  12 assertions per architecture): an all-zero pose is accepted as undeclared,
+  (2,0,0,0) refused, (1,1,0,0) refused, an `INT64_MAX` component refused without
+  overflow, a refused pose leaving the previous state untouched, a proper unit
+  quaternion accepted and read back, a dead wire reporting `NO_OBJECT`, a null
+  pointer reporting `INVAL`, a departed frame reporting `BROKEN_FRAME`, two
+  objects pointing at each other reporting `CYCLE`, and an over-long acyclic
+  chain reporting `DEPTH` rather than `CYCLE`
+- **命令 / 解算 / 实测分离验证段**（`base/verify.c` 第十一部分，双架构）：
+  验证转动参照系的位置耦合项 `ω × r`、世界角速度继承、实测半径改变切向速度、
+  相对静止物件不累计自己的位姿但仍解算出参照系的世界速度、执行层更新
+  `state.linear` / `state.angular`，以及外部改写位姿后旧积分余数不会泄漏进新轨迹
+  / **commanded / resolved / measured separation section** (`base/verify.c`,
+  part 11, on both architectures): verifies the rotating-frame coupling term
+  `omega x r`, inherited world angular velocity, measured radius controlling
+  tangential speed, a relatively still object keeping zero local pose while
+  resolving to its frame's world velocity, executor updates to `state.linear`
+  and `state.angular`, and stale integration carry being cleared after an
+  externally written pose
 - **新鲜度验证段**（`base/verify.c`，第七部分）：零长度窗口拒绝、过期事件
   返回 `MOTION_E_DEADLINE`、端点回绕拒绝、边界 `now == deadline` 接受、
-  未来事件拒绝 —— `MOTION_E_DEADLINE` 由此第一次成为可达路径
+  未来事件拒绝 —— `MOTION_E_DEADLINE` 由此第一次成为可达路径。该段只使用
+  自己的局部提交时刻，**不再依赖「前面的测试把执行时钟推到了约 106 ms」**，
+  因此结论不随测试顺序漂移
   / **freshness verification section** (`base/verify.c`, part 7): zero-length
   window refused, expired event returns `MOTION_E_DEADLINE`, wrapping endpoint
   refused, boundary `now == deadline` accepted, event from the future refused —
-  `MOTION_E_DEADLINE` is reachable for the first time
+  `MOTION_E_DEADLINE` is reachable for the first time. The section uses only its
+  own local submission instants and **no longer depends on earlier tests having
+  pushed the execution clock to about 106 ms**, so the verdict does not drift
+  with test order
+- **执行时钟安全验证段**（`base/verify.c`，第九部分）：正向推进被接受、
+  回退被拒且不推进任何物件、同一时刻不算回退、插上后首次 `object_run`
+  只排期不步进、下一周期边界恰好一步、空步数指针被拒、排期加法回绕被拒、
+  被拒之后时钟仍可继续使用。全部在**两个架构**上实测
+  / **execution-clock safety section** (`base/verify.c`, part 9): forward
+  advance accepted, rollback refused without advancing anything, the same
+  instant is not a rollback, the first `object_run` after plug-in only
+  schedules, the next period boundary performs exactly one step, a null step
+  counter is refused, a wrapping scheduling addition is refused, and the clock
+  remains usable afterwards. Measured on **both architectures**
+- **能力申报与 `dof` 尾部验证段**（`base/verify.c`，第十部分，两个架构各 21 条
+  断言）：尾部归零、尾部不得顺参照链泄漏进子物件的世界运动、`dof` 越界拒绝、
+  区间反向拒绝、负速率拒绝、负质量拒绝、被拒后仍为「未申报」、合法申报被接受、
+  未激活轴清零、超速率命令返回 `MOTION_E_LIMIT`、恰好等于上限被接受、
+  负方向同一判定、`INT64_MIN` 不能绕过闸门、被拒命令不扰动已接受运动、
+  未申报能力的物件不设限
+  / **capability and `dof`-tail verification section** (`base/verify.c`,
+  part 10, 21 assertions on each architecture): the tail is normalised to zero,
+  the tail cannot leak through the frame chain into a child's world motion,
+  out-of-range `dof` refused, inverted interval refused, negative rate refused,
+  negative mass refused, the object stays undeclared after refusals, a
+  well-formed description is accepted, inactive axes are zeroed, an over-rate
+  command is refused with `MOTION_E_LIMIT`, exactly-at-limit accepted, the same
+  in the negative direction, `INT64_MIN` cannot bypass the gate, a refused
+  command leaves the accepted motion untouched, and an object that declared
+  nothing is not rate-limited
+- **基座纯净性门禁 `make check-purity`**（纳入 `check-release`）：用符号名匹配
+  断言 `base/base.c` 里不出现 `cap`、`limit_min`、`limit_max`、`max_rate`、
+  `mass`、`orientation`、`position`、`described`、`still` —— 基座一旦开始
+  理解这些名字，就不再是无状态函数了。该门禁已实测会**真的失败**
+  （向副本注入 `object_capability_t cap` 即被捕获），不是空跑
+  / **base-purity gate `make check-purity`** (part of `check-release`): symbol
+  matching asserts that `base/base.c` never mentions `cap`, `limit_min`,
+  `limit_max`, `max_rate`, `mass`, `orientation`, `position`, `described` or
+  `still` — as soon as the base understands those names it is no longer a
+  stateless function. The gate was shown to **actually fail** by injecting
+  `object_capability_t cap` into a copy, so it is not a no-op
 
 ### Changed / 变更
 
@@ -264,13 +580,15 @@
 - **安全、可靠性与性能评估**：新增目标内核基准与压力测试，覆盖合法/拒绝路径、
   1 层与 8 层参照链、全部可用槽位的最坏推进、表满故障关闭、伪造句柄拒绝和
   20,000 次插拔循环；新增 `tools/bench.sh` 与中英文评估报告。QEMU 实测最坏推进
-  约占一个 100 Hz 节拍的 1% 至 2%
+  约占一个 100 Hz 节拍的 1% 至 2%（**该数字已被后续尾延迟门禁取代**：
+  同一负载现按 p99.9 / 最大值报告，见本文上方「可重复的尾延迟门禁」）
   / **Security, reliability, and performance assessment**: new in-kernel benchmarks
   and stress tests cover accepted/rejected paths, one- and eight-object frame chains,
   a worst pass over every available slot, fail-closed capacity exhaustion, forged
   handles, and 20,000 plug/unplug cycles. `tools/bench.sh` and bilingual assessment
   reports reproduce the results; the measured worst pass consumes about 1% to 2% of
-  a 100 Hz tick under QEMU
+  a 100 Hz tick under QEMU (**superseded by the tail-latency gate below**: the same
+  workload is now reported as p99.9 / maximum)
 - **保护状态自报**：x86_64 打印 CR0/CR4/CR3 与页目录权限；riscv64 打印 satp。
   当前证据明确显示 x86_64 为可写可执行恒等映射且 `CR0.WP=0`，riscv64 为 Bare
   模式，因此尚无生产级内存或上层大脑隔离

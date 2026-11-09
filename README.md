@@ -1,10 +1,10 @@
-# liteOS
+# DONos
 
 > 一切皆运动。基座只管运动控制 —— 无状态，可被任意大脑骑乘。
 >
 > *Everything is motion. The base manages only motion control — stateless, and any brain can ride it.*
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](LICENSE)
 [![Language: C](https://img.shields.io/badge/language-C11-blue.svg)](https://en.wikipedia.org/wiki/C11_(C_standard_revision))
 [![Status: Prototype](https://img.shields.io/badge/status-prototype-orange.svg)](#项目状态--project-status)
 [![Docs: bilingual](https://img.shields.io/badge/docs-%E4%B8%AD%E8%8B%B1%E5%8F%8C%E8%AF%AD%20%7C%20bilingual-informational.svg)](docs/README.md)
@@ -14,9 +14,9 @@
 
 ## 这是什么 / What is this
 
-liteOS 不是"一个操作系统"，而是一个**基座**：一个只管运动控制、无状态、可被任意上层大脑骑乘的底座。
+DONos 不是"一个操作系统"，而是一个**基座**：一个只管运动控制、无状态、可被任意上层大脑骑乘的底座。
 
-*liteOS is not "an operating system" but a **base**: a stateless foundation that does exactly one thing — motion control — and can be ridden by any replaceable brain.*
+*DONos is not "an operating system" but a **base**: a stateless foundation that does exactly one thing — motion control — and can be ridden by any replaceable brain.*
 
 | 层 / Layer | 角色 / Role | 特征 / Property |
 |---|---|---|
@@ -82,7 +82,7 @@ make run
 The serial console prints platform init, bus discovery and the self-test (excerpt):
 
 ```
-=== liteOS ===
+=== DONos ===
 --- platform ---
   idt   installed (48 vectors)
   irq   enabled, timer ticking
@@ -105,22 +105,40 @@ test code.
 `tools/check-toolchain.sh`。引导细节（PVH、32→64 位切换）见
 [docs/boot.md](docs/boot.md)。
 
-运行两种架构的安全、可靠性与性能测量 / Run the security, reliability,
-and performance measurements on both architectures:
+## 两种构建 / Two builds
+
+**证据不随固件出货。** 默认构建产出发布镜像，不含任何自检或基准代码；
+自检与基准需要显式打开。
 
 ```sh
+# 发布镜像（默认，无自检/基准代码）
 make ARCH=x86_64
 make ARCH=riscv64
-tools/bench.sh
+make check-slim          # 断言发布镜像无自检符号、体积达标、能跑起来
 
-# 等价的一条命令（CI 跑的就是它）
-make check
+# 证据镜像（含全部自检、基准、故障注入探针）
+make ARCH=x86_64 SELFTEST=1
+make check               # 跑完 13 部分自检 + 长期运行 + 中断风暴
 ```
 
-评估结论必须同时阅读性能数字与安全限制：当前最坏推进约占 100 Hz
-节拍的 1% 至 2%，但尚无用户态、W^X、NX 强制隔离或上层大脑沙箱。
-详见 [中文评估](docs/assessment.md) / [English assessment](docs/assessment.en.md)
-与 [SECURITY.md](SECURITY.md)。
+实测体积：x86_64 代码段 69,632 → **24,576** 字节，加载体积 208,608 →
+**135,188**；riscv64 代码段 53,248 → **16,384**，加载体积 139,360 →
+**73,816**。
+
+*Evidence does not ship with the firmware. The default build produces the
+release image with no self-test or benchmark code; the evidence build needs an
+explicit switch.*
+
+## 评估结论 / Assessment
+
+评估结论必须同时阅读性能数字与安全限制：满表推进的 p99.9 与最大值约占
+100 Hz 节拍的 8.95%（x86_64）/ 7.66%（riscv64），这是 QEMU 确定性指令
+计数基线（`-icount`），不是芯片纳秒或 WCET 证明。两架构都做到了完整
+W^X（同一页永不同时可写又可执行，由真实违规访问证实），但仍**没有
+用户态、没有上层大脑沙箱、没有授权模型**，也不支持多核。
+**每条结论都标注证据等级（E1 实测 /
+E2 门禁 / E3 仅论证）**，详见 [中文评估](docs/assessment.md) /
+[English assessment](docs/assessment.en.md) 与 [SECURITY.md](SECURITY.md)。
 
 *Toolchain check: `tools/check-toolchain.sh`. Boot details (PVH, the
 32→64 transition): [docs/boot.en.md](docs/boot.en.md). To verify the
@@ -171,4 +189,5 @@ exception handler, build once with `make FAULT_TEST=1`.*
 
 ## 许可证 / License
 
-[MIT](LICENSE)
+[GPL-2.0-only](LICENSE) — 强著性许可：分发衍生作品必须以同一许可提供完整源码
+/ [GPL-2.0-only](LICENSE) — copyleft: derived works must be distributed under the same licence with complete source

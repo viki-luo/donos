@@ -1,16 +1,16 @@
 cff-version: 1.2.0
 message: "引用本软件时请使用以下信息 / If you use this software, please cite it as below."
-title: "liteOS: a stateless motion-control base"
+title: "DONos: a stateless motion-control base"
 abstract: >-
-  liteOS is not an operating system but a base: a stateless foundation that does
+  DONos is not an operating system but a base: a stateless foundation that does
   exactly one thing, motion control, and can be ridden by any hot-pluggable upper
   brain. Everything is treated as a motion object; the base is the only
   non-object. It runs on x86_64 and riscv64 and is verified under QEMU on both.
 type: software
-license: MIT
+license: GPL-2.0-only
 
 authors:
-  - name: "liteOS contributors"
+  - name: "DONos contributors"
 
 # 版本号遵循语义化版本；本项目尚未发布归档版本（CHANGELOG 只有 Unreleased），
 # 因此不声明 version 与 date-released，避免生成虚假的发布日期。
@@ -18,8 +18,8 @@ authors:
 # (CHANGELOG has only "Unreleased"), so version and date-released are omitted to
 # avoid fabricating a release date.
 
-repository-code: "https://github.com/OWNER/REPO"
-url: "https://github.com/OWNER/REPO"
+repository-code: "https://github.com/viki-luo/donos"
+url: "https://github.com/viki-luo/donos"
 
 keywords:
   - bare-metal
@@ -39,7 +39,7 @@ identifiers:
 
 preferred-citation:
   type: software
-  title: "liteOS: a stateless motion-control base"
-  license: MIT
+  title: "DONos: a stateless motion-control base"
+  license: GPL-2.0-only
   authors:
-    - name: "liteOS contributors"
+    - name: "DONos contributors"

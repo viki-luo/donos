@@ -1,5 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * base.h — liteOS 基座接口（硬件无关）
+ * base.h — DONos 基座接口（硬件无关）
  *
  * 基座是一个无状态的运动控制函数：
  *
@@ -14,8 +15,8 @@
  * 任何在本文件之外出现的「停止」「查询状态」「记录历史」接口，
  * 都是设计违规。
  */
-#ifndef LITEOS_BASE_H
-#define LITEOS_BASE_H
+#ifndef DONOS_BASE_H
+#define DONOS_BASE_H
 
 #include "types.h"
 
@@ -112,17 +113,24 @@ typedef enum {
         MOTION_E_NO_WIRE   = -2,  /* 目标接线不存在或已断开 */
         MOTION_E_NO_FRAME  = -3,  /* 参照系接线不存在或已断开 */
         MOTION_E_NO_OBJECT = -4,  /* 接线当前没有物件 */
-        MOTION_E_DEADLINE  = -5,  /* 事件已过期：发出时刻 + 窗口早于执行时钟 */
+        MOTION_E_DEADLINE  = -5,  /* 事件已过期：发出时刻 + 窗口早于提交时刻 */
+        MOTION_E_LIMIT     = -6,  /* 命令幅值超出物件自报的最大速率（物件侧判定） */
 } motion_status_t;
 
 /*
  * 施加运动 —— 基座唯一的原语。
  *
- * 成功返回 MOTION_OK。基座把事件交给目标物件，不在自身保存任何东西。
- * 基座不计时：新鲜度窗口由物件层按执行时钟判定（设计决定 10 修订），
- * 过期事件以 MOTION_E_DEADLINE 拒绝；一旦接受，物件持续沿该事件运动。
+ * now_ns 是事件到达本原语的提交时刻，由调用者提供。基座只把它作为
+ * 本次调用的参数传给物件，不保存时间；因此新鲜度判断不会错误复用
+ * 上一次 object_run 的旧节拍。过期事件以 MOTION_E_DEADLINE 拒绝；
+ * 一旦接受，物件持续沿该事件运动。
+ *
+ * 基座自身只校验「事件形状」：dof 不越界、目标接线与参照接线当前有效。
+ * 它不读 motion[]、不读能力申报、不知道 max_rate / 行程 / 姿态的存在，
+ * 因此 MOTION_E_LIMIT 这类「物件按自身能力拒绝」的状态码由物件层产生，
+ * 基座只是把它原样传回。这条分工由 make check-purity 静态断言。
  */
-motion_status_t base_apply(const motion_event_t *ev);
+motion_status_t base_apply(u64 now_ns, const motion_event_t *ev);
 
 /* ------------------------------------------------------------------ */
 /* 接线                                                                */
@@ -159,4 +167,4 @@ void base_depart(wire_t w);
 /* 接线当前是否有效（仅查询接线本身，不涉及世界状态）。 */
 bool base_wire_valid(wire_t w);
 
-#endif /* LITEOS_BASE_H */
+#endif /* DONOS_BASE_H */

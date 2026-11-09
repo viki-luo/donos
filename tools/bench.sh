@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # bench.sh — 在两个架构上跑同一套测量，并把关键数字并排列出
 #
 # 为什么要有这个脚本：
@@ -21,6 +22,23 @@ if [ -d /ucrt64/bin ]; then
 fi
 
 ARCHES="${1:-x86_64 riscv64}"
+
+# 证据构建与发布构建输出到不同目录：自检/基准跑的是 SELFTEST=1 那份，
+# 因为它才含 bench 代码；发布镜像不含任何证据代码。
+SELFTEST="${SELFTEST:-1}"
+if [ "$SELFTEST" = "1" ]; then
+        IMG_SUBDIR="selftest"
+else
+        IMG_SUBDIR=""
+fi
+
+img_path() {
+        if [ -n "$IMG_SUBDIR" ]; then
+                printf 'build/%s/%s/donos.bin' "$1" "$IMG_SUBDIR"
+        else
+                printf 'build/%s/donos.bin' "$1"
+        fi
+}
 
 # 运行 QEMU：内核不主动退出，因此 timeout(124) 是正常结束；
 # 其他非零退出（镜像错误、启动即崩）视为失败。
@@ -46,34 +64,36 @@ run_qemu() {
 
 run_x86_64() {
         echo "--- x86_64 (TSC 计数) ---"
-        run_qemu build/bench-x86_64.log 6 \
+        run_qemu build/bench-x86_64.log 30 \
                 qemu-system-x86_64 \
-                -kernel build/x86_64/liteos.bin \
+                -icount shift=0,align=off,sleep=off \
+                -kernel "$(img_path x86_64)" \
                 -m 256M \
                 -serial file:build/bench-x86_64.log \
                 -display none -no-reboot -no-shutdown
         tr -d '\r' < build/bench-x86_64.log | grep -E \
-                'free object|ticks/call|ticks/run|tick period|share|capacity =|churn cycles|bench failures|failures ='
+                'free object|ticks/call|latency (average|p50|p99 |p99.9|max)|histogram|bucket|tick period|run share|latency budget|capacity =|churn cycles|bench failures|failures =|endurance ticks|storm ticks'
 }
 
 run_riscv64() {
         echo "--- riscv64 (time CSR 计数, 10 MHz) ---"
-        run_qemu build/bench-riscv64.log 25 \
+        run_qemu build/bench-riscv64.log 60 \
                 qemu-system-riscv64 \
+                -icount shift=0,align=off,sleep=off \
                 -machine virt -bios default -m 256M \
-                -kernel build/riscv64/liteos.bin \
+                -kernel "$(img_path riscv64)" \
                 -device e1000 \
                 -serial file:build/bench-riscv64.log \
                 -display none -no-reboot
         tr -d '\r' < build/bench-riscv64.log | grep -E \
-                'free object|ticks/call|ticks/run|tick period|share|capacity =|churn cycles|bench failures|failures ='
+                'free object|ticks/call|latency (average|p50|p99 |p99.9|max)|histogram|bucket|tick period|run share|latency budget|capacity =|churn cycles|bench failures|failures =|endurance ticks|storm ticks'
 }
 
 for a in $ARCHES; do
         case "$a" in
-                x86_64)  [ -f build/x86_64/liteos.bin ]  || { echo "缺少 x86_64 镜像，先 make ARCH=x86_64";  exit 1; }
+                x86_64)  [ -f "$(img_path x86_64)" ]  || { echo "缺少 x86_64 镜像，先 make ARCH=x86_64 SELFTEST=$SELFTEST";  exit 1; }
                          run_x86_64 ;;
-                riscv64) [ -f build/riscv64/liteos.bin ] || { echo "缺少 riscv64 镜像，先 make ARCH=riscv64"; exit 1; }
+                riscv64) [ -f "$(img_path riscv64)" ] || { echo "缺少 riscv64 镜像，先 make ARCH=riscv64 SELFTEST=$SELFTEST"; exit 1; }
                          run_riscv64 ;;
                 *)       echo "未知架构: $a"; exit 1 ;;
         esac
@@ -82,10 +102,10 @@ done
 cat <<'NOTE'
 
 读这些数字时请注意三条：
-  1. 只有「同一次运行内的比值」可以当结论，例如
-     worst run share of a tick —— 它不依赖计数器刻度。
-  2. 每次调用的计数值在虚拟机里是宿主时间，不是芯片时间；
-     两者不可跨架构直接比绝对值。
-  3. riscv64 的计数器是 10 MHz（一格 100 ns），单次调用精度不足，
-     所以那里只测成批调用的平均值。
+  1. 只有同一次运行、同一计数器内的比值可以作为门禁结论，例如
+     p99.9 run share of a tick；绝对计数不可跨架构比较。
+  2. 普通 QEMU 运行会混入宿主调度暂停，曾测出超过一个节拍的虚假尾值；
+     门禁使用 -icount shift=0,align=off,sleep=off 固定指令推进，形成可重复基线。
+  3. icount 不是物理芯片时间。真实硬件仍需另跑同一分位数与预算，
+     不能把这里的计数值冒充真实纳秒或 WCET 证明。
 NOTE

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-2.0-only
 # run.sh — 在 QEMU 中启动内核（带超时，防止卡死）
 set -e
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
 if [ -d /ucrt64/bin ]; then export PATH=/usr/bin:/bin:/ucrt64/bin:$PATH; fi
 
-BIN=build/x86_64/liteos.bin
+BIN=build/x86_64/donos.bin
 
 if [ ! -f "$BIN" ]; then
         echo "请先构建: tools/build.sh"

@@ -4,10 +4,10 @@
 
 ## 支持范围 / Supported versions
 
-liteOS 尚处于**原型阶段（0.x）**，没有发布过带安全支持的稳定版本。
+DONos 尚处于**原型阶段（0.x）**，没有发布过带安全支持的稳定版本。
 所有安全相关结论以当前的 `main` 分支为准。
 
-*liteOS is in **prototype (0.x)**; no stable release has security support.
+*DONos is in **prototype (0.x)**; no stable release has security support.
 All security statements below refer to the current `main` branch.*
 
 | 分支 / Branch | 支持 / Supported |
@@ -100,13 +100,13 @@ upper brain runs with the same privilege as the base.*
 
 ### 因此 / Therefore
 
-liteOS **不是**一个适合承载以下负载的系统：
+DONos **不是**一个适合承载以下负载的系统：
 
 - 连接不可信输入（网络、用户态、外部设备固件）
 - Must 满足安全认证（ISO 26262 / IEC 61508 / DO-178C / Common Criteria 等）
 - 运行来自第三方的、未经审查的"大脑"代码
 
-*liteOS is **not** suitable for untrusted input, safety certifications, or
+*DONos is **not** suitable for untrusted input, safety certifications, or
 running unreviewed third-party brain code.*
 
 ## 供应链 / Supply chain

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * verify.c — 基座语义与统一模型的验证
  *
@@ -6,11 +7,28 @@
  * 整个「一切皆是运动物件」就不成立了，而这里会直接失败。
  */
 #include "base.h"
+#include "fixed.h"
 #include "object.h"
 #include "report.h"
 #include "verify.h"
 
 static int failures;
+
+/*
+ * 每次自检只在一个确定的提交时刻上提交命令。
+ *
+ * 早先的写法把提交时刻绑在"最近一次 object_run"上：测试顺序一变，
+ * 或者自检少跑了一段，同一个事件就会从新鲜变成过期，失败也
+ * 说不清是语义错了还是测试自己漂了。现在时刻是测试自己的局部量，
+ * 显式推进，互不影响。
+ */
+#define MS 1000000ULL
+
+/*
+ * 提交时刻从 0 起算。make_event() 造出的事件都带 1 秒新鲜度窗口，
+ * 因此在这个基线上的提交必然落在窗口内，不依赖任何前序测试。
+ */
+static u64 clk;
 
 static void check(const char *what, bool ok)
 {
@@ -70,10 +88,17 @@ static motion_fixed_t q_dist(motion_fixed_t v, u64 period_ns, u32 n)
         motion_fixed_t pos = 0;
 
         for (u32 k = 0; k < n; k++) {
-                motion_fixed_t num = v * (motion_fixed_t)period_ns + carry;
+                motion_fixed_t step;
+                motion_fixed_t next_carry;
+                motion_fixed_t next_pos;
 
-                pos += num / 1000000000LL;   /* 向零截断，与实现一致 */
-                carry = num % 1000000000LL;
+                if (fixed_velocity_step_checked(v, period_ns, carry,
+                                                &step, &next_carry) != FIXED_OK ||
+                    fixed_add_checked(pos, step, &next_pos) != FIXED_OK)
+                        return 0;
+
+                pos = next_pos;
+                carry = next_carry;
         }
         return pos;
 }
@@ -98,8 +123,8 @@ static void verify_primitives(void)
         /* 1. A 相对世界以 100 运动 */
         motion_event_t ev = make_event(a, FRAME_WORLD, 1000000000ULL, 1, 100, 0);
         check("A moves relative to the world",
-              base_apply(&ev) == MOTION_OK && object_event_count(a) == 1);
-        check("A is not still", !object_is_still(a));
+              base_apply(clk, &ev) == MOTION_OK && object_event_count(a) == 1);
+        check("A is not commanded to be still", !object_commanded_is_zero(a));
 
         /*
          * 2. B 相对 A 静止 —— 这就是「静止是一种相对的运动」。
@@ -107,34 +132,35 @@ static void verify_primitives(void)
          */
         ev = make_event(b, a, 1000000000ULL, 1, 0, 0);
         check("B is still relative to A (motion == 0)",
-              base_apply(&ev) == MOTION_OK);
-        check("B reads as still", object_is_still(b));
+              base_apply(clk, &ev) == MOTION_OK);
+        check("B is commanded to be still relative to A",
+              object_commanded_is_zero(b));
 
         /* 3. 参照系必须是一条有效的接线 */
         ev = make_event(a, 9999, 1000000000ULL, 1, 5, 0);
-        check("unknown frame is rejected", base_apply(&ev) == MOTION_E_NO_FRAME);
+        check("unknown frame is rejected", base_apply(clk, &ev) == MOTION_E_NO_FRAME);
 
         /* 4. 目标接线必须存在 */
         ev = make_event(9999, FRAME_WORLD, 1000000000ULL, 1, 5, 0);
-        check("unknown wire is rejected", base_apply(&ev) == MOTION_E_NO_WIRE);
+        check("unknown wire is rejected", base_apply(clk, &ev) == MOTION_E_NO_WIRE);
 
         /* 5. dof 越界 */
         ev = make_event(a, FRAME_WORLD, 1000000000ULL, MOTION_DOF_MAX + 1, 1, 0);
-        check("dof over the limit is rejected", base_apply(&ev) == MOTION_E_INVAL);
+        check("dof over the limit is rejected", base_apply(clk, &ev) == MOTION_E_INVAL);
 
         /* 6. 空事件指针 */
-        check("null event is rejected", base_apply(0) == MOTION_E_INVAL);
+        check("null event is rejected", base_apply(clk, 0) == MOTION_E_INVAL);
 
         /* 7. 拔出后，接线立即失效，事件被拒 */
         object_unplug(b);
         check("departed wire is no longer valid", !base_wire_valid(b));
         ev = make_event(b, FRAME_WORLD, 1000000000ULL, 1, 7, 0);
         check("event to a departed wire is rejected",
-              base_apply(&ev) == MOTION_E_NO_WIRE);
+              base_apply(clk, &ev) == MOTION_E_NO_WIRE);
 
         /* 8. 拔出 B 之后，以 B 为参照系也必须被拒 */
         ev = make_event(a, b, 1000000000ULL, 1, 5, 0);
-        check("a departed frame is rejected", base_apply(&ev) == MOTION_E_NO_FRAME);
+        check("a departed frame is rejected", base_apply(clk, &ev) == MOTION_E_NO_FRAME);
 
         object_unplug(a);
 }
@@ -178,18 +204,18 @@ static void verify_unified(void)
          */
         motion_event_t ev = make_event(brain1, FRAME_WORLD, 1000000000ULL, 1, 1, 0);
         check("base_apply drives the brain like any object",
-              base_apply(&ev) == MOTION_OK);
+              base_apply(clk, &ev) == MOTION_OK);
         check("thinking is motion (brain motion[0] == 1)",
               object_motion(brain1, 0) == 1);
 
         /* ---- 断言 2：手脚也是普通接线 ---- */
         ev = make_event(hand, FRAME_WORLD, 1000000000ULL, 1, 50, 0);
         check("hand moves (motion[0] == 50)",
-              base_apply(&ev) == MOTION_OK && object_motion(hand, 0) == 50);
+              base_apply(clk, &ev) == MOTION_OK && object_motion(hand, 0) == 50);
 
         ev = make_event(foot, FRAME_WORLD, 1000000000ULL, 1, 30, 0);
         check("foot moves (motion[0] == 30)",
-              base_apply(&ev) == MOTION_OK && object_motion(foot, 0) == 30);
+              base_apply(clk, &ev) == MOTION_OK && object_motion(foot, 0) == 30);
 
         /*
          * ---- 断言 3：基座在结构上无法区分二者 ----
@@ -221,7 +247,7 @@ static void verify_unified(void)
         /* ---- 断言 5：大脑可以叠大脑，没有特权顶层 ---- */
         ev = make_event(brain2, FRAME_WORLD, 1000000000ULL, 1, 2, 0);
         check("a brain can itself be driven by a higher brain",
-              base_apply(&ev) == MOTION_OK && object_motion(brain2, 0) == 2);
+              base_apply(clk, &ev) == MOTION_OK && object_motion(brain2, 0) == 2);
 
         /* 同一条线上，既可以是大脑（下令者），也可以是物件（被驱动者） */
         arch_puts("  note: the same wire is both a brain and a drivable object;\n");
@@ -286,7 +312,8 @@ static void verify_self_description(void)
         check("capability is unavailable before the object describes itself",
               !object_capability(part, &got));
 
-        object_describe(part, &cap);
+        check("a well-formed description is accepted",
+              object_describe(part, &cap));
         check("capability becomes readable after describing",
               object_capability(part, &got) && got.dof == 3);
         check("limits survive the round trip",
@@ -346,22 +373,22 @@ static void verify_frame_resolution(void)
 
         /* A 相对世界 100；B 相对 A 5；C 相对 B 2 */
         motion_event_t ev = make_event(a, FRAME_WORLD, 1000000000ULL, 1, 100, 0);
-        base_apply(&ev);
+        base_apply(clk, &ev);
         ev = make_event(b, a, 1000000000ULL, 1, 5, 0);
-        base_apply(&ev);
+        base_apply(clk, &ev);
         ev = make_event(c, b, 1000000000ULL, 1, 2, 0);
-        base_apply(&ev);
+        base_apply(clk, &ev);
 
         check("B resolves to 105 relative to the world",
-              object_resolve(b, r) && r[0] == 105);
+              object_resolve(b, r) == OBJECT_RESOLVE_OK && r[0] == 105);
         check("C resolves through a two-level chain to 107",
-              object_resolve(c, r) && r[0] == 107);
+              object_resolve(c, r) == OBJECT_RESOLVE_OK && r[0] == 107);
 
         /* 相对静止：B 相对 A 取零，解出来就等于 A 的运动 */
         ev = make_event(b, a, 1000000000ULL, 1, 0, 0);
-        base_apply(&ev);
+        base_apply(clk, &ev);
         check("still relative to A resolves to A's own motion (100)",
-              object_resolve(b, r) && r[0] == 100);
+              object_resolve(b, r) == OBJECT_RESOLVE_OK && r[0] == 100);
 
         /*
          * 成环：基座能接受（每次只看 frame 这条线是否有效），
@@ -369,16 +396,16 @@ static void verify_frame_resolution(void)
          */
         ev = make_event(a, c, 1000000000ULL, 1, 1, 0);
         check("the base accepts a cyclic frame (it cannot see chains)",
-              base_apply(&ev) == MOTION_OK);
+              base_apply(clk, &ev) == MOTION_OK);
         check("the object side detects the cycle",
-              !object_resolve(c, r));
+              object_resolve(c, r) == OBJECT_RESOLVE_E_CYCLE);
 
         /* 参照系离开后，链断开，解算必须失败而不是给出旧值 */
         ev = make_event(a, FRAME_WORLD, 1000000000ULL, 1, 100, 0);
-        base_apply(&ev);
+        base_apply(clk, &ev);
         object_unplug(a);
         check("a departed frame breaks the chain",
-              !object_resolve(b, r));
+              object_resolve(b, r) == OBJECT_RESOLVE_E_BROKEN_FRAME);
 
         object_unplug(b);
         object_unplug(c);
@@ -392,7 +419,12 @@ static void verify_frame_resolution(void)
 
 static bool near(motion_fixed_t a, motion_fixed_t b)
 {
-        motion_fixed_t d = a - b;
+        motion_fixed_t d;
+
+        if (fixed_sub_checked(a, b, &d) != FIXED_OK)
+                return false;
+        if (d == INT64_MIN)
+                return false;
         if (d < 0)
                 d = -d;
         return d < Q(1) / 1000;          /* 定点舍入误差容限 0.001 */
@@ -424,30 +456,30 @@ static void verify_frame_rotation(void)
 
         /* A 静止于世界；B 相对 A 沿 A 的 x 轴运动 10 */
         motion_event_t ev = make_event(a, FRAME_WORLD, 1000000000ULL, 3, 0, 0);
-        base_apply(&ev);
+        base_apply(clk, &ev);
         ev = make_event(b, a, 1000000000ULL, 3, Q(10), 0);
-        base_apply(&ev);
+        base_apply(clk, &ev);
 
         check("an unrotated frame leaves the motion unchanged (10, 0, 0)",
-              object_resolve(b, r) && r[0] == Q(10) && r[1] == 0);
+              object_resolve(b, r) == OBJECT_RESOLVE_OK && r[0] == Q(10) && r[1] == 0);
 
         /* A 绕 z 轴转 180°：q = {0, 0, 0, 1}，结果应精确为 (-10, 0, 0) */
         set_orientation(a, 0, 0, 0, Q(1));
         check("a frame turned 180 deg about z gives (-10, 0, 0)",
-              object_resolve(b, r) && r[0] == -Q(10) && r[1] == 0 && r[2] == 0);
+              object_resolve(b, r) == OBJECT_RESOLVE_OK && r[0] == -Q(10) && r[1] == 0 && r[2] == 0);
 
         /* A 绕 z 轴转 90°：q = {cos45, 0, 0, sin45}，结果约为 (0, 10, 0) */
         motion_fixed_t c45 = 3037000500LL;   /* 0.70710678 x 2^32 */
         set_orientation(a, c45, 0, 0, c45);
-        bool ok = object_resolve(b, r);
+        bool ok = object_resolve(b, r) == OBJECT_RESOLVE_OK;
         check("a frame turned 90 deg about z gives (0, 10, 0)",
               ok && near(r[0], 0) && near(r[1], Q(10)) && near(r[2], 0));
 
         /* 相对 A 静止：无论 A 怎么转，解出来都等于 A 自身的运动（这里为 0） */
         ev = make_event(b, a, 1000000000ULL, 3, 0, 0);
-        base_apply(&ev);
+        base_apply(clk, &ev);
         check("still relative to a rotated frame stays still",
-              object_resolve(b, r) && r[0] == 0 && r[1] == 0 && r[2] == 0);
+              object_resolve(b, r) == OBJECT_RESOLVE_OK && r[0] == 0 && r[1] == 0 && r[2] == 0);
 
         object_unplug(a);
         object_unplug(b);
@@ -460,7 +492,7 @@ static void verify_frame_rotation(void)
 /* 给出。这里用合成时钟，结果完全确定。                                */
 /* ------------------------------------------------------------------ */
 
-#define MS 1000000ULL
+/* ------------------------------------------------------------------ */
 
 static void verify_execution(void)
 {
@@ -472,14 +504,22 @@ static void verify_execution(void)
         wire_t idle     = object_plug(0, 0);        /* 未申报周期 */
 
         motion_event_t ev = make_event(fast, FRAME_WORLD, 1000000000ULL, 1, Q(1), 0);
-        base_apply(&ev);                            /* 1 m/s */
+        base_apply(clk, &ev);                            /* 1 m/s */
         ev = make_event(slow, FRAME_WORLD, 1000000000ULL, 1, Q(1), 0);
-        base_apply(&ev);                            /* 同样 1 m/s：量纲对照 */
+        base_apply(clk, &ev);                            /* 同样 1 m/s：量纲对照 */
         ev = make_event(follower, fast, 1000000000ULL, 1, 0, 0);
-        base_apply(&ev);
+        base_apply(clk, &ev);
 
-        for (u64 t = 1; t <= 9; t++)
-                object_run(t * MS);
+        /*
+         * 推 10 ms：执行层第一次看见物件只建立排期，不凭空积分一个
+         * 尚未经过的周期。因此 1 ms 周期的物件在第 2..10 ms 上步进
+         * 9 次，3 ms 周期的物件在第 4、7、10 ms 上步进 3 次 ——
+         * 两者覆盖的世界时间同为 9 ms。
+         */
+        u32 step_st = 0;
+
+        for (u64 t = 1; t <= 10; t++)
+                object_run(t * MS, &step_st);
 
         check("fast object stepped 9 times in 9 ms",
               object_step_count(fast) == 9);
@@ -509,15 +549,23 @@ static void verify_execution(void)
               ok && fast_pos == st.position[0]);
 
         /*
-         * 相对 fast 静止的物件，在世界里跟着 fast 一起走 ——
-         * 「静止是一种相对的运动」在时间推进下依然成立。
+         * 相对 fast 静止的物件：它自己的位姿不动（相对参照系没有位移），
+         * 但解算到世界之后，它的世界速度与 fast 相同 ——
+         * 「静止是一种相对的运动」在时间推进下依然成立，而且这句话的
+         * 两半现在各自可测：相对位姿为零，世界速度不为零。
          */
         ok = object_state(follower, &st);
-        check("an object still relative to fast moves with it",
-              ok && st.position[0] == fast_pos);
+        check("an object still relative to fast has no pose of its own",
+              ok && st.position[0] == 0 && st.position[1] == 0);
+
+        motion_fixed_t fr[MOTION_DOF_MAX];
+        check("...yet resolves to fast's world velocity",
+              object_resolve(follower, fr) == OBJECT_RESOLVE_OK && fr[0] == Q(1));
 
         /* 落后很久之后只走一步，不会一次补跑几十步 */
-        object_run(100 * MS);
+        u32 late_st = 0;
+
+        object_run(100 * MS, &late_st);
         check("a late run steps once instead of catching up",
               object_step_count(fast) == 10);
 
@@ -540,13 +588,13 @@ static void verify_conformance(void)
 
         /* R1：单一控制面 —— 静止不需要第二种指令，只是 motion 取零的事件 */
         ev = make_event(o, FRAME_WORLD, 1000000000ULL, 1, 5, 0);
-        base_apply(&ev);
+        base_apply(clk, &ev);
         ev = make_event(o, FRAME_WORLD, 1000000000ULL, 1, 0, 0);
         check("R1 a zero-motion event makes the object still",
-              base_apply(&ev) == MOTION_OK && object_is_still(o));
+              base_apply(clk, &ev) == MOTION_OK && object_commanded_is_zero(o));
         ev = make_event(o, FRAME_WORLD, 1000000000ULL, 0, 0, 0);
         check("R1 a zero-dof event is also accepted as still",
-              base_apply(&ev) == MOTION_OK && object_is_still(o));
+              base_apply(clk, &ev) == MOTION_OK && object_commanded_is_zero(o));
 
         /*
          * R2：自持 —— 窗口只约束「何时可被接受」；一旦接受，
@@ -554,13 +602,15 @@ static void verify_conformance(void)
          * 执行时钟已被上一段推到 100 ms：先把钟推进一步，再以当前时刻
          * 为发出时刻提交，避免事件在提交前就已过期。
          */
-        object_run(101 * MS);           /* 落后一步只走一步，同时校准执行时钟 */
+        u32 r2_st = 0;
+
+        object_run(101 * MS, &r2_st);
         ev = make_event_at(o, FRAME_WORLD, 101 * MS, 2 * MS, 1, Q(4), 0);
         check("R2 a fresh event is accepted",
-              base_apply(&ev) == MOTION_OK);
+              base_apply(101 * MS, &ev) == MOTION_OK);
         u32 before = object_step_count(o);
         for (u64 t = 102; t <= 106; t++)
-                object_run(t * MS);
+                object_run(t * MS, &r2_st);
 
         object_state_t st;
         bool ok = object_state(o, &st);
@@ -587,44 +637,719 @@ static void verify_conformance(void)
 /* 绝不执行 —— 这是大脑热切换与通道拥塞场景下的安全性质。              */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* 第七部分：checked Q32.32 算术边界                                   */
+/* ------------------------------------------------------------------ */
+
+static void verify_fixed_boundaries(void)
+{
+        motion_fixed_t out = 0;
+        motion_fixed_t delta = 0;
+        motion_fixed_t carry = 0;
+
+        arch_puts("\n--- checked Q32.32 arithmetic boundaries ---\n\n");
+
+        check("checked add rejects INT64_MAX + 1",
+              fixed_add_checked(INT64_MAX, 1, &out) == FIXED_E_OVERFLOW);
+        check("checked add rejects INT64_MIN - 1",
+              fixed_add_checked(INT64_MIN, -1, &out) == FIXED_E_OVERFLOW);
+        check("checked subtract rejects INT64_MIN - 1",
+              fixed_sub_checked(INT64_MIN, 1, &out) == FIXED_E_OVERFLOW);
+        check("checked Q32.32 multiply rejects an unrepresentable result",
+              fixed_mul_checked(INT64_MAX, INT64_MAX, &out) ==
+                      FIXED_E_OVERFLOW);
+
+        check("3 m/s over one second is integrated without signed overflow",
+              fixed_velocity_step_checked(Q(3), 1000000000ULL, 0,
+                                          &delta, &carry) == FIXED_OK &&
+              delta == Q(3) && carry == 0);
+        check("INT64_MAX velocity over one second remains representable",
+              fixed_velocity_step_checked(INT64_MAX, 1000000000ULL, 0,
+                                          &delta, &carry) == FIXED_OK &&
+              delta == INT64_MAX && carry == 0);
+        check("INT64_MIN velocity over one second remains representable",
+              fixed_velocity_step_checked(INT64_MIN, 1000000000ULL, 0,
+                                          &delta, &carry) == FIXED_OK &&
+              delta == INT64_MIN && carry == 0);
+        check("an invalid carry boundary is refused",
+              fixed_velocity_step_checked(0, 1, 1000000000LL,
+                                          &delta, &carry) == FIXED_E_INVAL);
+}
+
 static void verify_freshness(void)
 {
+        /*
+         * 提交时刻完全由本测试给出，不读执行时钟、不调用 object_run。
+         * 新鲜度是「事件与提交时刻」的关系，与运动环排期无关；把两者
+         * 绑在一起会让结论随测试顺序漂移。
+         */
+        const u64 now = 500 * MS;
+
         arch_puts("\n--- freshness: a stale command is refused, never executed ---\n\n");
 
         wire_t o = object_plug(2, 1 * MS);
+        motion_event_t ev;
 
         /* 零长度窗口：deadline == 发出时刻，任何延迟都不可接受 */
-        motion_event_t ev = make_event_at(o, FRAME_WORLD, 0, 0, 1, Q(1), 0);
+        ev = make_event_at(o, FRAME_WORLD, now, 0, 1, Q(1), 0);
         check("a zero-length window is rejected",
-              base_apply(&ev) == MOTION_E_INVAL);
+              base_apply(now, &ev) == MOTION_E_INVAL);
 
-        /* 未来事件：发出时刻晚于执行时钟（执行时钟此刻约 106 ms） */
-        ev = make_event_at(o, FRAME_WORLD, 200 * MS, 1000 * MS, 1, Q(1), 0);
+        /* 未来事件：发出时刻晚于提交时刻，时间来源异常 */
+        ev = make_event_at(o, FRAME_WORLD, now + 1, 1000 * MS, 1, Q(1), 0);
         check("an event issued in the future is rejected",
-              base_apply(&ev) == MOTION_E_INVAL);
+              base_apply(now, &ev) == MOTION_E_INVAL);
 
         /* 过期：窗口早已闭合，命令绝不下发执行 */
-        ev = make_event_at(o, FRAME_WORLD, 0, 2 * MS, 1, Q(1), 0);
+        ev = make_event_at(o, FRAME_WORLD, now - 2 * MS, 1 * MS, 1, Q(1), 0);
         check("an expired event is refused with E_DEADLINE",
-              base_apply(&ev) == MOTION_E_DEADLINE);
+              base_apply(now, &ev) == MOTION_E_DEADLINE);
 
-        /* 端点回绕：issued + duration 溢出会伪造一个「永不过期」的窗口 */
+        /*
+         * 端点回绕：issued + duration 溢出会伪造一个「永不过期」的窗口。
+         * 这里让 issued <= now，排除「未来事件」也能返回 E_INVAL 的可能：
+         * 若缺少回绕检查，deadline 截断成 7 之后 now > deadline，
+         * 结论会变成 E_DEADLINE，本条即失败。
+         */
         ev = make_event_at(o, FRAME_WORLD, UINT64_MAX - 3, 10, 1, Q(1), 0);
         check("a window that wraps the clock counter is rejected",
-              base_apply(&ev) == MOTION_E_INVAL);
+              base_apply(UINT64_MAX - 2, &ev) == MOTION_E_INVAL);
 
-        /* 边界：执行时钟恰在 deadline 上，仍可接受 */
-        object_run(107 * MS);
-        ev = make_event_at(o, FRAME_WORLD, 105 * MS, 2 * MS, 1, Q(1), 0);
+        /* 边界：提交时刻恰在 deadline 上，仍可接受 */
+        ev = make_event_at(o, FRAME_WORLD, now - 2 * MS, 2 * MS, 1, Q(1), 0);
         check("an event exactly at its deadline is still accepted",
-              base_apply(&ev) == MOTION_OK);
+              base_apply(now, &ev) == MOTION_OK);
 
         /* 新鲜窗口内正常接受 */
-        ev = make_event_at(o, FRAME_WORLD, 107 * MS, 1000 * MS, 1, Q(1), 0);
+        ev = make_event_at(o, FRAME_WORLD, now, 1000 * MS, 1, Q(1), 0);
         check("a fresh event inside its window is accepted",
-              base_apply(&ev) == MOTION_OK);
+              base_apply(now, &ev) == MOTION_OK);
 
         object_unplug(o);
+}
+
+/* ------------------------------------------------------------------ */
+/* 第九部分：执行时钟的安全性质                                        */
+/*                                                                    */
+/* 时间来自调用者，就可能回退、可能回绕。执行层必须拒绝这两件事，      */
+/* 而不是把它们当成「一个很大的增量」默默算下去。                      */
+/* ------------------------------------------------------------------ */
+
+static void verify_time_safety(void)
+{
+        u32 stepped = 0;
+
+        /* 明确高于前序测试用过的节拍，避免本条本身被判定为回退 */
+        const u64 base = 500 * MS;
+
+        arch_puts("\n--- execution clock: rollback, overflow, first run ---\n\n");
+
+        check("a forward run advances the execution clock",
+              object_run(base, &stepped) == OBJECT_RUN_OK);
+
+        check("a run that goes backwards in time is refused",
+              object_run(base - 1, &stepped) ==
+                      OBJECT_RUN_E_CLOCK_ROLLBACK);
+
+        check("the same instant is not a rollback",
+              object_run(base, &stepped) == OBJECT_RUN_OK);
+
+        /*
+         * 首次被执行层看见的物件只建立排期：插上就「已经走了一个周期」
+         * 意味着位置里凭空多出一段从未经过的时间。
+         */
+        wire_t fresh = object_plug(1, 1 * MS);
+        motion_event_t ev = make_event(fresh, FRAME_WORLD, 1000000000ULL,
+                                       3, Q(1), 0);
+
+        check("a fresh event is accepted before the first run",
+              base_apply(base, &ev) == MOTION_OK);
+
+        check("the first run after plugging only schedules",
+              object_run(base + 1 * MS, &stepped) == OBJECT_RUN_OK &&
+              object_step_count(fresh) == 0);
+
+        check("the next period boundary performs exactly one step",
+              object_run(base + 2 * MS, &stepped) == OBJECT_RUN_OK &&
+              object_step_count(fresh) == 1);
+
+        check("a null step counter is refused",
+              object_run(base + 3 * MS, 0) == OBJECT_RUN_E_INVAL);
+
+        /*
+         * 排期加法回绕：now + period_ns 越过 u64 上界时不许截断成一个小数，
+         * 否则下一次到期时刻会落在过去，运动环变成每拍都跑。
+         */
+        check("a scheduling addition that would wrap the clock is refused",
+              object_run(UINT64_MAX - 1, &stepped) ==
+                      OBJECT_RUN_E_TIME_OVERFLOW);
+
+        check("a refused scheduled time leaves the clock usable",
+              object_run(base + 4 * MS, &stepped) == OBJECT_RUN_OK);
+
+        object_unplug(fresh);
+}
+
+/* ------------------------------------------------------------------ */
+/* 第十部分：dof 尾部与能力申报的纪律                                  */
+/*                                                                    */
+/* 两条缺陷同源：模型读了「没被声明的东西」。                         */
+/*   1. 事件只声明 dof 个分量，实现却照抄全部 6 个 —— 尾部可能是上一条  */
+/*      命令的残值或未初始化的栈内容，而且会顺参照链累加进世界速度。    */
+/*   2. 能力申报来者不拒 —— dof 越界、区间反向、负速率都会被接受，      */
+/*      而申报过的 max_rate 从不被检查。                              */
+/* ------------------------------------------------------------------ */
+
+static void cap_zero(object_capability_t *cap)
+{
+        cap->dof = 0;
+        cap->mass = 0;
+        for (u8 i = 0; i < MOTION_DOF_MAX; i++) {
+                cap->limit_min[i] = 0;
+                cap->limit_max[i] = 0;
+                cap->max_rate[i]  = 0;
+        }
+}
+
+static void verify_dof_and_capability(void)
+{
+        arch_puts("\n--- dof tail and declared capability ---\n\n");
+
+        wire_t hub  = object_plug(2, 1000000);
+        wire_t leaf = object_plug(2, 1000000);
+
+        /* hub 只声明 1 个自由度，尾部全部填上哨兵值 */
+        motion_event_t ev = make_event(hub, FRAME_WORLD, 1000000000ULL,
+                                       1, Q(1), Q(9));
+        ev.motion[2] = Q(9);
+        ev.motion[3] = Q(9);
+        ev.motion[4] = Q(9);
+        ev.motion[5] = Q(9);
+        check("an event with a polluted tail is still accepted",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        check("the tail outside dof is normalised to zero",
+              object_motion(hub, 1) == 0 && object_motion(hub, 2) == 0 &&
+              object_motion(hub, 3) == 0 && object_motion(hub, 4) == 0 &&
+              object_motion(hub, 5) == 0);
+        check("the declared component is kept",
+              object_motion(hub, 0) == Q(1));
+
+        /*
+         * 关键一条：leaf 相对 hub 静止（dof = 0）。hub 的尾部若被照抄，
+         * 就会顺着参照链把自己那些「没被命令的角速度」加进 leaf 的
+         * 世界运动里 —— 一个 dof=1 的物件因此能推动整条链。
+         */
+        ev = make_event(leaf, hub, 1000000000ULL, 0, 0, 0);
+        check("a still child is accepted",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        motion_fixed_t r[MOTION_DOF_MAX];
+        for (u8 i = 0; i < MOTION_DOF_MAX; i++)
+                r[i] = 0;
+        check("the tail cannot leak through the frame chain",
+              object_resolve(leaf, r) == OBJECT_RESOLVE_OK && r[0] == Q(1) && r[1] == 0 &&
+              r[2] == 0 && r[3] == 0 && r[4] == 0 && r[5] == 0);
+
+        object_unplug(leaf);
+
+        /* ---- 能力申报的校验 ---- */
+
+        object_capability_t cap;
+        object_capability_t got;
+
+        cap_zero(&cap);
+        cap.dof = MOTION_DOF_MAX + 1;
+        check("a description with dof over the limit is refused",
+              !object_describe(hub, &cap));
+        check("a refused description leaves the object undeclared",
+              !object_capability(hub, &got));
+
+        cap_zero(&cap);
+        cap.dof = 1;
+        cap.limit_min[0] = Q(10);
+        cap.limit_max[0] = Q(-10);
+        check("a description with an inverted interval is refused",
+              !object_describe(hub, &cap));
+
+        cap_zero(&cap);
+        cap.dof = 1;
+        cap.max_rate[0] = -Q(1);
+        check("a description with a negative rate is refused",
+              !object_describe(hub, &cap));
+
+        cap_zero(&cap);
+        cap.dof = 1;
+        cap.mass = -Q(1);
+        check("a description with a negative mass is refused",
+              !object_describe(hub, &cap));
+
+        check("still undeclared after four refused descriptions",
+              !object_capability(hub, &got));
+
+        cap_zero(&cap);
+        cap.dof = 1;
+        cap.mass = Q(1);
+        cap.limit_min[0] = Q(-1);
+        cap.limit_max[0] = Q(1);
+        cap.max_rate[0]  = Q(2);
+        cap.max_rate[3]  = Q(7);            /* 超出 dof：应被清零 */
+        check("a well-formed description is accepted",
+              object_describe(hub, &cap));
+
+        check("the inactive axes of a description are zeroed",
+              object_capability(hub, &got) && got.max_rate[3] == 0 &&
+              got.limit_max[3] == 0);
+
+        /* ---- 申报的速率现在真的会拦命令 ---- */
+
+        ev = make_event(hub, FRAME_WORLD, 1000000000ULL, 1, Q(3), 0);
+        check("a command above the declared rate is refused with E_LIMIT",
+              base_apply(clk, &ev) == MOTION_E_LIMIT);
+
+        ev = make_event(hub, FRAME_WORLD, 1000000000ULL, 1, Q(2), 0);
+        check("a command exactly at the declared rate is accepted",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        ev = make_event(hub, FRAME_WORLD, 1000000000ULL, 1, -Q(2), 0);
+        check("the same rate in the negative direction is accepted",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        ev = make_event(hub, FRAME_WORLD, 1000000000ULL, 1, -Q(3), 0);
+        check("an over-rate command in the negative direction is refused",
+              base_apply(clk, &ev) == MOTION_E_LIMIT);
+
+        /*
+         * INT64_MIN 的幅值是 2^63，取负会在 INT64_MIN 上溢出，
+         * 因此它必须被单独判定为超限，而不是绕过检查。
+         */
+        ev = make_event(hub, FRAME_WORLD, 1000000000ULL, 1, INT64_MIN, 0);
+        check("INT64_MIN cannot slip past the rate gate",
+              base_apply(clk, &ev) == MOTION_E_LIMIT);
+
+        check("a refused command does not disturb the accepted motion",
+              object_motion(hub, 0) == -Q(2));
+
+        /* dof 之外的轴本来就没有分量，速率闸门不该对它们生效 */
+        ev = make_event(hub, FRAME_WORLD, 1000000000ULL, 1, Q(1), Q(9));
+        check("the tail is not rate-checked because it is not commanded",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        object_unplug(hub);
+
+        /* 未申报能力的物件不设限：能力闸门只在申报之后生效 */
+        wire_t raw = object_plug(2, 1000000);
+        ev = make_event(raw, FRAME_WORLD, 1000000000ULL, 6, Q(9), Q(9));
+        check("an object that declared nothing is not rate-limited",
+              base_apply(clk, &ev) == MOTION_OK);
+        object_unplug(raw);
+}
+
+/* ------------------------------------------------------------------ */
+/* 第十一部分：命令 / 解算 / 实测三者分离                              */
+/*                                                                    */
+/* 三条缺陷同源：三个不同的量被当成同一个用。                          */
+/*   1. object_resolve() 只做「旋转 + 相加」，丢掉位置耦合项 ω × r ——  */
+/*      挂在自转参照系上的物件只会跟着平移，不会被转出去。             */
+/*   2. 执行层把解算出的**世界**速度积分进**相对参照系**的 position —— */
+/*      参照系自己在动时，物件的相对位姿会长出参照系的位移。           */
+/*   3. state.linear / angular 从不被写入，永远是零。                  */
+/* ------------------------------------------------------------------ */
+
+/*
+ * 把执行层的时间轴推到 at，保证不回退。物件首次被看见只排期，
+ * 因此调用者要自己多推几个周期才看得到位移。
+ */
+static void run_to(u64 at)
+{
+        u32 stepped = 0;
+
+        if (object_now_ns() < at)
+                object_run(at, &stepped);
+}
+
+static void verify_commanded_resolved_measured(void)
+{
+        arch_puts("\n--- commanded / resolved / measured ---\n\n");
+
+        /*
+         * 一个绕自身 z 轴以 1 rad/s 自转的转台，物件挂在半径 1 m 处。
+         * 物件自己相对转台静止（命令为零），但它在世界里必须沿切向
+         * 以 1 m/s 运动：v = ω × r = (0,0,1) x (1,0,0) = (0,1,0)。
+         * 少了这一项，解出来的世界速度会是零 —— 物体「钉」在转台上被拖着
+         * 平移，而不是被转出去。
+         */
+        wire_t table = object_plug(0, 1 * MS);
+        wire_t rider = object_plug(0, 1 * MS);
+
+        motion_event_t ev = make_event(table, FRAME_WORLD, 1000000000ULL, 6,
+                                       0, 0);
+        ev.motion[5] = Q(1);                     /* 角速度 z = 1 rad/s */
+        check("a turntable spinning about z is accepted",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        ev = make_event(rider, table, 1000000000ULL, 3, 0, 0);
+        check("a rider still relative to the turntable is accepted",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        object_state_t st;
+        for (u8 i = 0; i < 3; i++) {
+                st.position[i] = 0;
+                st.linear[i]   = 0;
+                st.angular[i]  = 0;
+        }
+        for (u8 i = 0; i < 4; i++)
+                st.orientation[i] = 0;
+        st.position[0] = Q(1);                   /* 半径 1 m */
+        object_set_state(rider, &st);
+
+        motion_fixed_t r[MOTION_DOF_MAX];
+        bool ok = object_resolve(rider, r) == OBJECT_RESOLVE_OK;
+        check("the rider's world linear velocity is omega x r = (0, 1, 0)",
+              ok && r[0] == 0 && near(r[1], Q(1)) && near(r[2], 0));
+        check("the rider's world angular velocity is the turntable's",
+              ok && near(r[5], Q(1)));
+
+        /*
+         * 命令与实测必须分开：rider 自己被告知的是零，实测位姿是半径 1 m，
+         * 世界速度是 1 m/s。三者同时成立，互不覆盖。
+         */
+        ok = object_state(rider, &st);
+        check("the rider's own commanded motion stays zero",
+              ok && object_commanded_is_zero(rider));
+        check("the rider's own measured position stays at radius 1",
+              ok && st.position[0] == Q(1));
+
+        /*
+         * 位置耦合项用的是实测位置：把半径改成 2 m，切向速度必须翻倍。
+         * 若耦合项取的是命令，这里不会有任何变化。
+         */
+        st.position[0] = Q(2);
+        object_set_state(rider, &st);
+        ok = object_resolve(rider, r) == OBJECT_RESOLVE_OK;
+        check("doubling the measured radius doubles the tangential speed",
+              ok && near(r[1], Q(2)));
+
+        /*
+         * 参照系自己平移时，物件**相对位姿**不该长出参照系的位移。
+         * 位置耦合项只作用于 world 解算，不回流进 state.position。
+         */
+        st.position[0] = 0;
+        object_set_state(rider, &st);
+        ev = make_event(table, FRAME_WORLD, 1000000000ULL, 3, Q(1), 0);
+        ev.motion[5] = 0;                        /* 只平移，不自转 */
+        check("the turntable is now a purely translating frame",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        ev = make_event(rider, table, 1000000000ULL, 3, 0, 0);
+        check("the rider is still relative to it",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        u64 t0 = object_now_ns();
+        for (u64 t = 1; t <= 4; t++)
+                run_to(t0 + t * MS);
+
+        ok = object_state(rider, &st);
+        check("a carried object accumulates no pose of its own",
+              ok && st.position[0] == 0 && st.position[1] == 0);
+        check("but its resolved world velocity is the frame's",
+              object_resolve(rider, r) == OBJECT_RESOLVE_OK && near(r[0], Q(1)));
+
+        /*
+         * 实测速度不再是死字段：执行层推进过之后，state.linear/angular
+         * 必须反映本物件相对参照系的速度。
+         */
+        ev = make_event(rider, table, 1000000000ULL, 6, Q(1), 0);
+        ev.motion[5] = Q(2);
+        check("the rider is given its own velocity",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        t0 = object_now_ns();
+        for (u64 t = 1; t <= 3; t++)
+                run_to(t0 + t * MS);
+
+        ok = object_state(rider, &st);
+        check("measured linear velocity reflects the command",
+              ok && st.linear[0] == Q(1));
+        check("measured angular velocity reflects the command",
+              ok && st.angular[2] == Q(2));
+
+        /*
+         * 改写位姿必须丢掉旧的积分余数。
+         *
+         * 先让物件跑出一点余数（3 m/s 在 1 ms 上每步 0.003 m，不整除），
+         * 再把位置清零。若余数被留下，下一步就会把上一个位置的历史
+         * 零头加到新位置上，位置不再是 0 而是那个零头。
+         */
+        wire_t carrier = object_plug(0, 1 * MS);
+        ev = make_event(carrier, FRAME_WORLD, 1000000000ULL, 1, Q(3), 0);
+        check("a third object takes a non-dividing velocity",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        t0 = object_now_ns();
+        for (u64 t = 1; t <= 5; t++)
+                run_to(t0 + t * MS);
+
+        for (u8 i = 0; i < 3; i++) {
+                st.position[i] = 0;
+                st.linear[i]   = 0;
+                st.angular[i]  = 0;
+        }
+        for (u8 i = 0; i < 4; i++)
+                st.orientation[i] = 0;
+        object_set_state(carrier, &st);
+
+        ok = object_state(carrier, &st);
+        check("an externally written pose reads back exactly",
+              ok && st.position[0] == 0);
+
+        /*
+         * 改写位姿（余数被清）之后立刻换一条新命令：此后位置的增长
+         * 必须只来自「新命令 × 周期」。若旧余数还留着，前几步在 3 m/s
+         * 上攒下的零头会被加进来，位置就不是这条干净新轨迹的值。
+         */
+        ev = make_event(carrier, FRAME_WORLD, 1000000000ULL, 1, Q(1), 0);
+        check("a fresh 1 m/s command is accepted",
+              base_apply(clk, &ev) == MOTION_OK);
+
+        t0 = object_now_ns();
+        run_to(t0 + 1 * MS);
+        t0 = object_now_ns();
+        run_to(t0 + 1 * MS);
+
+        ok = object_state(carrier, &st);
+        check("the stale carry does not leak into the new trajectory",
+              ok && st.position[0] == q_dist(Q(1), 1 * MS, 2));
+
+        object_unplug(table);
+        object_unplug(rider);
+        object_unplug(carrier);
+}
+
+/* ------------------------------------------------------------------ */
+/* 第十二部分：姿态合法性与解算失败的成因                              */
+/*                                                                    */
+/* 两条缺陷同源：把「说不清」当成「说完了」。                          */
+/*   1. 非单位四元数被当作旋转使用 —— 用 2q 旋转会得到两倍长的向量，   */
+/*      而错误会伪装成精度问题。                                     */
+/*   2. 断链、成环、链过深、算术溢出共用同一个 false，诊断信息没有     */
+/*      任何可用之处，且成环与「合法但太长」被混为一谈。               */
+/* ------------------------------------------------------------------ */
+
+static void state_zero(object_state_t *st)
+{
+        for (u8 i = 0; i < 3; i++) {
+                st->position[i] = 0;
+                st->linear[i]   = 0;
+                st->angular[i]  = 0;
+        }
+        for (u8 i = 0; i < 4; i++)
+                st->orientation[i] = 0;
+}
+
+static void verify_quaternion_and_resolve_status(void)
+{
+        arch_puts("\n--- pose validity and resolve failure causes ---\n\n");
+
+        wire_t q = object_plug(2, 1000000);
+        object_state_t st;
+        object_state_t back;
+
+        /* ---- 四元数校验 ---- */
+
+        state_zero(&st);
+        st.position[0] = Q(7);
+        check("an all-zero orientation means 'no pose declared' and is accepted",
+              object_set_state(q, &st));
+
+        state_zero(&st);
+        st.orientation[0] = Q(2);
+        check("a scaled quaternion (2,0,0,0) is refused",
+              !object_set_state(q, &st));
+
+        state_zero(&st);
+        st.orientation[0] = Q(1);
+        st.orientation[1] = Q(1);
+        check("a non-unit quaternion (1,1,0,0) is refused",
+              !object_set_state(q, &st));
+
+        state_zero(&st);
+        st.orientation[0] = INT64_MAX;
+        check("a quaternion with a huge component is refused without overflow",
+              !object_set_state(q, &st));
+
+        check("a refused pose leaves the previous state untouched",
+              object_state(q, &back) && back.position[0] == Q(7));
+
+        /* 0.7071 + 0.7071i 是合法的单位四元数 */
+        motion_fixed_t c45 = 3037000500LL;
+        state_zero(&st);
+        st.position[0] = Q(8);
+        st.orientation[0] = c45;
+        st.orientation[3] = c45;
+        check("a properly normalised quaternion is accepted",
+              object_set_state(q, &st));
+        check("an accepted pose reads back",
+              object_state(q, &back) && back.position[0] == Q(8) &&
+              back.orientation[3] == c45);
+
+        object_unplug(q);
+
+        /* ---- 解算失败的成因可区分 ---- */
+
+        motion_fixed_t r[MOTION_DOF_MAX];
+
+        check("resolving a dead wire reports NO_OBJECT",
+              object_resolve(WIRE_NONE, r) == OBJECT_RESOLVE_E_NO_OBJECT);
+
+        wire_t a = object_plug(2, 1000000);
+        check("resolving with a null output reports INVAL",
+              object_resolve(a, 0) == OBJECT_RESOLVE_E_INVAL);
+
+        motion_event_t ev = make_event(a, FRAME_WORLD, 1000000000ULL, 1, 1, 0);
+        base_apply(clk, &ev);
+
+        /* 链断开：参照系离开 */
+        wire_t b = object_plug(2, 1000000);
+        ev = make_event(b, a, 1000000000ULL, 1, 1, 0);
+        base_apply(clk, &ev);
+        object_unplug(a);
+        check("a departed frame reports BROKEN_FRAME",
+              object_resolve(b, r) == OBJECT_RESOLVE_E_BROKEN_FRAME);
+        object_unplug(b);
+
+        /* 成环：两条接线互为参照 */
+        wire_t c1 = object_plug(2, 1000000);
+        wire_t c2 = object_plug(2, 1000000);
+        ev = make_event(c1, c2, 1000000000ULL, 1, 1, 0);
+        base_apply(clk, &ev);
+        ev = make_event(c2, c1, 1000000000ULL, 1, 1, 0);
+        base_apply(clk, &ev);
+        check("a two-object cycle reports CYCLE",
+              object_resolve(c1, r) == OBJECT_RESOLVE_E_CYCLE);
+        object_unplug(c1);
+        object_unplug(c2);
+
+        /* 合法但过长：OBJECT_FRAME_DEPTH_MAX + 2 个物件的直链 */
+        wire_t chain[OBJECT_FRAME_DEPTH_MAX + 2];
+        u32 built = 0;
+
+        for (u32 i = 0; i < OBJECT_FRAME_DEPTH_MAX + 2u; i++) {
+                chain[i] = object_plug(2, 1000000);
+                if (chain[i] == WIRE_NONE)
+                        break;
+                ev = make_event(chain[i], i == 0 ? FRAME_WORLD : chain[i - 1],
+                                1000000000ULL, 1, 1, 0);
+                base_apply(clk, &ev);
+                built++;
+        }
+
+        check("an over-long but acyclic chain reports DEPTH, not CYCLE",
+              built == OBJECT_FRAME_DEPTH_MAX + 2u &&
+              object_resolve(chain[built - 1], r) == OBJECT_RESOLVE_E_DEPTH);
+
+        for (u32 i = 0; i < built; i++)
+                object_unplug(chain[i]);
+}
+
+/* ------------------------------------------------------------------ */
+/* 第十三部分：热插拔的发布顺序                                        */
+/*                                                                    */
+/* 缺陷：object_plug() 先把接线发布出去（in_use + wire），再初始化     */
+/* 其余字段。find_by_wire() 只认这两个字段，于是在那个窗口里命令会被  */
+/* 接受，却按**上一个占用者**的 frame、周期与速率上限判定。           */
+/* 现在接线是最后一个被写入的字段：可见即就绪。                       */
+/* ------------------------------------------------------------------ */
+
+static void verify_hotplug_publish(void)
+{
+        arch_puts("\n--- hot-plug: a reused slot carries no leftovers ---\n\n");
+
+        wire_t a = object_plug(5, 1000000);
+        object_state_t st;
+        object_capability_t cap;
+
+        for (u8 i = 0; i < 3; i++) {
+                st.position[i] = Q(3);
+                st.linear[i]   = Q(2);
+                st.angular[i]  = Q(1);
+        }
+        for (u8 i = 0; i < 4; i++)
+                st.orientation[i] = 0;
+        st.orientation[0] = Q(1);
+        object_set_state(a, &st);
+
+        for (u8 i = 0; i < MOTION_DOF_MAX; i++) {
+                cap.limit_min[i] = -Q(9);
+                cap.limit_max[i] = Q(9);
+                cap.max_rate[i]  = Q(1);
+        }
+        cap.dof = 3;
+        cap.mass = Q(4);
+        object_describe(a, &cap);
+
+        motion_event_t ev = make_event(a, FRAME_WORLD, 1000000000ULL, 1, Q(1), 0);
+        base_apply(clk, &ev);
+
+        u64 before = object_event_count(a);
+
+        check("the first occupant really did accumulate state",
+              before >= 1 && object_capability(a, &cap));
+
+        wire_t departed = a;
+        object_unplug(a);
+
+        check("the departed handle is refused by the base",
+              base_apply(clk, &ev) == MOTION_E_NO_WIRE);
+
+        /*
+         * 重新插一个物件：它很可能落进同一个槽位，但**绝不能**继承
+         * 上一个占用者的命令、位姿或能力申报。
+         */
+        wire_t b = object_plug(1, 3 * 1000000);
+
+        arch_puts("  note: previous wire ");
+        print_wire(departed);
+        arch_puts(", new wire ");
+        print_wire(b);
+        arch_puts("\n\n");
+
+        check("the new occupant is a different, live handle",
+              b != WIRE_NONE && !base_wire_valid(departed));
+
+        check("it inherits no command",
+              object_commanded_is_zero(b));
+
+        check("it inherits no event count",
+              object_event_count(b) == 0);
+
+        object_state_t fresh;
+
+        for (u8 i = 0; i < 3; i++) {
+                fresh.position[i] = 0;
+                fresh.linear[i]   = 0;
+                fresh.angular[i]  = 0;
+        }
+        for (u8 i = 0; i < 4; i++)
+                fresh.orientation[i] = 0;
+
+        check("it inherits no pose",
+              object_state(b, &fresh) && fresh.position[0] == 0 &&
+              fresh.orientation[0] == 0);
+
+        check("it inherits no capability declaration",
+              !object_capability(b, &cap));
+
+        u32 unit = 0;
+        u64 period = 0;
+        check("its own declared unit and period are what it asked for",
+              object_declared(b, &unit, &period) && unit == 1 &&
+              period == 3 * 1000000);
+
+        check("it has not been stepped yet",
+              object_step_count(b) == 0);
+
+        object_unplug(b);
 }
 
 int base_verify(void)
@@ -638,7 +1363,13 @@ int base_verify(void)
         verify_frame_rotation();
         verify_execution();
         verify_conformance();
+        verify_fixed_boundaries();
         verify_freshness();
+        verify_time_safety();
+        verify_dof_and_capability();
+        verify_commanded_resolved_measured();
+        verify_quaternion_and_resolve_status();
+        verify_hotplug_publish();
 
         arch_puts("\n  failures = ");
         arch_putdec((u64)failures);
