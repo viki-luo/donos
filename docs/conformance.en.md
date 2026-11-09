@@ -29,9 +29,37 @@ It is not necessarily a bad object; accepting it would require a second primitiv
 | **R7** | At most 6 degrees of freedom | A single wire carries at most 6 dimensions | `dof > 6` is rejected | **tested** |
 | **R8** | Self-describing | Can declare its capability and hold its pose and velocity, via the direct brain channel, never through the base | Readable after declaring; `base.h` has no corresponding interface | **tested** |
 
+| **R9** | Device interface conformance | When a real device is attached it must satisfy DONOS-MO-1: commands go to `set_velocity`, the measurement is overwritten by `sample`, and the measurement must not be a copy of the command | `tests/host/conformance_mo.c` runs one device-agnostic suite over two implementations (linear dof=1, angular dof=6) | **Tested** |
+
 R7 is not a limitation: a seven-axis arm does not "fail to conform" — it is "more than one object". It consists of several wires of at most 6 dimensions each, serving as each other's frames.
 
 R8 is a precondition of R5: resolving `frame` requires knowing where both the object and its frame are.
+### How R9 relates to R1-R8
+
+R1-R8 constrain **what an object looks like to the base**: one wire, at most six
+dimensions, self-describing, self-sustaining, referenceable. R9 constrains **what sits
+behind the object**: whether that is a wheel, a joint or something else, any
+implementation satisfying DONOS-MO-1's numeric rules and behavioural clauses can be
+recognised and driven, and **the system never asks what it is**.
+
+The standard deliberately has no device-type field. A `type = wheel / joint` field
+would force the base to understand those names and turn every new device into an
+upstream change, which contradicts "the base does motion control and nothing else":
+
+- **S-2 refuse rather than clamp**: an out-of-limit command is refused outright, never
+  quietly clamped to something close.
+- **S-3 measured is independent**: `sample` must reflect sensor truth. This is the
+  precondition for drift detection, which was identically zero while the measurement
+  was a copy of the command.
+- **S-4 failure is honest**: a failed read returns false and keeps the last
+  measurement; "no data" is never reported as zero velocity.
+- **S-5 no unit leak**: wheel radius, gear ratio, encoder counts and joint zero offset
+  live in the adapter; the event has no field to put them in.
+
+The full clause list is in `drivers/include/mo_standard.h`; the machine check is
+`tests/host/conformance_mo.c`, which prints the part it cannot reach (D-3, no blocking)
+instead of dressing a review obligation up as tested.
+
 
 ---
 

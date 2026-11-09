@@ -129,6 +129,27 @@ make check               # 跑完 13 部分自检 + 长期运行 + 中断风暴
 release image with no self-test or benchmark code; the evidence build needs an
 explicit switch.*
 
+## 设备接口标准 / Device interface standard
+
+**不管插上来的是轮子、关节还是别的东西，只要符合 DONOS-MO-1 就能被识别与操控；
+系统不问它是什么。** 标准分三部分：数值约定（全 Q32.32、SI 单位、纳秒单调时间、
+方向即符号）、必须提供的接口（`set_velocity`、覆盖全部字段的 `sample`）、
+八条行为条款（先申报、拒绝而非钳制、实测独立、失效诚实、单位不泄漏、无类型、
+首次不积分、热拔插安全）。
+
+**标准里刻意没有设备类型字段。** 一旦有 `type = wheel / joint`，基座就要开始
+理解这些名字，新设备就会变成内核改动。一致性由
+[`tests/host/conformance_mo.c`](tests/host/conformance_mo.c) 机检：同一份
+**设备无关**套件跑两种互不相关的实现（线速度 dof=1、角速度 dof=6）都必须通过。
+完整条款见 [`drivers/include/mo_standard.h`](drivers/include/mo_standard.h)。
+
+*Whatever is plugged in — a wheel, a joint, or something else — is recognised and
+driven as long as it satisfies DONOS-MO-1, and the system never asks what it is.
+The standard deliberately carries no device-type field: a `type` field would force
+the base to understand those names and make every new device an upstream change.
+One device-agnostic conformance suite runs two unrelated implementations and both
+must pass.*
+
 ## 评估结论 / Assessment
 
 评估结论必须同时阅读性能数字与安全限制：满表推进的 p99.9 与最大值约占

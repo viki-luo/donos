@@ -116,6 +116,9 @@ x86_64 has 58 free slots because PCI discovery keeps six devices online. The ris
 | Normal execution resumes after an expected fault | Pass | Ordinary RX code runs after both probes | E1 + E2 |
 | Objects stay inside the declared travel interval | Pass | The limited axis stops exactly at +4 m and refuses the following steps | E1 + E2 |
 
+| Device-agnostic interface conformance (MO-1) | Pass | One suite runs a linear dof=1 and an angular dof=6 implementation, 13 assertions each | E1 + E2 |
+| Measurement comes from the device, not the command | Pass | With a 1 m/s command against a device reaching 0.2 m/s, the measurement reports 0.2 and the monitor reports drift | E1 + E2 |
+
 ### 4.2 Confirmed security gaps
 
 #### x86_64 (currently installed)
