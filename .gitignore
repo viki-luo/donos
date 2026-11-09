@@ -24,3 +24,6 @@ desktop.ini
 # 临时文件 / Temp files
 *.log
 *.tmp
+# 本地模拟 CI 时产生的串口日志 / serial log produced when replaying CI locally
+serial.txt
+serial.log
