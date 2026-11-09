@@ -13,6 +13,7 @@
  */
 #include "base.h"
 #include "fixed.h"
+#include "motion_device.h"
 #include "object.h"
 #include "quat.h"
 typedef struct {
@@ -49,6 +50,13 @@ typedef struct {
         object_state_t      state;
         object_capability_t cap;
         bool                described;
+
+        /*
+         * 真实设备。非空时，位置与实测速度都来自 sample()，
+         * 执行层不再自己积分 —— 设备才是唯一知道「实际动了多少」的一方。
+         */
+        const motion_device_ops_t *dev;
+        void                      *dev_ctx;
 } object_t;
 
 static object_t objects[OBJECT_MAX];
@@ -97,6 +105,8 @@ void object_init(void)
                 zero(&objects[i].state, sizeof(objects[i].state));
                 zero(&objects[i].cap, sizeof(objects[i].cap));
                 objects[i].described = false;
+                objects[i].dev = 0;
+                objects[i].dev_ctx = 0;
         }
 }
 
@@ -161,6 +171,8 @@ wire_t object_plug(u32 unit, u64 period_ns)
                 zero(&objects[i].state, sizeof(objects[i].state));
                 zero(&objects[i].cap, sizeof(objects[i].cap));
                 objects[i].described = false;
+                objects[i].dev = 0;
+                objects[i].dev_ctx = 0;
 
                 wire_t w = base_arrive();
                 if (w == WIRE_NONE)
@@ -785,9 +797,92 @@ static bool integrate_orientation(object_t *o)
         return true;
 }
 
+/*
+ * 挂/摘真实设备。
+ *
+ * 挂上设备之后，位置与实测速度不再由执行层自己推算：设备才是唯一
+ * 知道「实际动了多少」的一方。这也是「命令 / 解算 / 实测」三分离的
+ * 最后一段 —— 之前实测只是命令的影子，偏差检测因此永远为零。
+ */
+bool object_attach_device(wire_t w, const void *ops, void *ctx)
+{
+        object_t *o = find_by_wire(w);
+        if (o == 0)
+                return false;
+
+        if (ops == 0 || ctx == 0) {
+                o->dev = 0;
+                o->dev_ctx = 0;
+                return true;
+        }
+
+        o->dev = (const motion_device_ops_t *)ops;
+        o->dev_ctx = ctx;
+        return true;
+}
+
+void object_detach_device(wire_t w)
+{
+        object_t *o = find_by_wire(w);
+        if (o == 0)
+                return;
+        o->dev = 0;
+        o->dev_ctx = 0;
+}
+
+bool object_has_device(wire_t w)
+{
+        object_t *o = find_by_wire(w);
+        return o != 0 && o->dev != 0;
+}
+
 static void object_step(object_t *o)
 {
         motion_fixed_t r[MOTION_DOF_MAX];
+
+        /*
+         * 真实设备模式：命令交给设备，实测从设备读回。
+         *
+         * 这里刻意不做任何积分 —— 真实电机的位置由编码器说了算，
+         * 执行层再积一次就等于把同一段位移记两遍。
+         * 读不到反馈时保持上一次的实测值：把它当成零会让监视器
+         * 以为物件「已经停住」，那是比没有数据更坏的谎话。
+         */
+        if (o->dev != 0) {
+                motion_fixed_t linear[3];
+                motion_fixed_t angular[3];
+
+                for (u8 i = 0; i < 3; i++) {
+                        linear[i]  = o->cmd_motion[i];
+                        angular[i] = o->cmd_motion[3 + i];
+                }
+
+                if (o->dev->set_velocity != 0)
+                        (void)o->dev->set_velocity(o->dev_ctx, linear, angular);
+
+                if (o->dev->sample != 0) {
+                        object_state_t sampled;
+
+                        /*
+                         * 逐字段拷贝，不做整结构赋值：整结构赋值会让编译器
+                         * 生成 memcpy，而 freestanding 构建没有 libc，
+                         * 链接期就会缺符号。
+                         */
+                        if (o->dev->sample(o->dev_ctx, &sampled)) {
+                                for (u8 i = 0; i < 3; i++) {
+                                        o->state.position[i] = sampled.position[i];
+                                        o->state.linear[i]   = sampled.linear[i];
+                                        o->state.angular[i]  = sampled.angular[i];
+                                }
+                                for (u8 i = 0; i < 4; i++)
+                                        o->state.orientation[i] =
+                                                sampled.orientation[i];
+                        }
+                }
+
+                o->step_count++;
+                return;
+        }
 
         /*
          * 解算在这里的作用是**参照链存活检查**，不是取速度来源。
@@ -844,9 +939,9 @@ static void object_step(object_t *o)
         }
 
         /*
-         * 实测速度跟着命令走：参考实现里物件的控制环就是它自己，
-         * 于是「刚被命令的速度」就是「当前实测的速度」。
-         * 不写这两个字段，它们就永远是零 —— 又一处死字段。
+         * 参考实现（无真实设备）：控制环就是物件自己，于是「刚被命令的
+         * 速度」就是「当前实测的速度」。这条路径只用于模拟与自检；
+         * 真实设备走上面的分支，实测必须来自传感器。
          */
         for (u8 i = 0; i < 3; i++) {
                 o->state.linear[i]  = o->cmd_motion[i];

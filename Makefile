@@ -325,6 +325,16 @@ $(MONITOR_TEST): tests/host/test_monitor.c monitor/monitor.c base/quat.c \
 # 姿态积分与行程限位的宿主边界：期望值全部手算，不回读实现。
 QUAT_TEST := build/host/test_quat.exe
 
+# 真实设备挂接：证明实测来自设备而不是命令的副本。
+DEVICE_TEST := build/host/test_device.exe
+
+$(DEVICE_TEST): tests/host/test_device.c base/quat.c base/base.c base/object.c \
+                base/fixed.c monitor/monitor.c base/include/base.h \
+                base/include/object.h base/include/fixed.h base/include/quat.h \
+                base/include/motion_device.h monitor/include/monitor.h
+	@mkdir -p build/host
+	$(HOST_CC) $(HOST_CFLAGS) -Imonitor/include tests/host/test_device.c -o $@
+
 $(QUAT_TEST): tests/host/test_quat.c base/base.c base/fixed.c base/quat.c \
               base/object.c base/include/base.h base/include/types.h \
               base/include/fixed.h base/include/quat.h base/include/object.h
@@ -353,11 +363,12 @@ fuzz: $(FUZZ_TEST)
 		echo "  确定性模糊出现失败"; exit 1; \
 	fi
 
-host-test: $(HOST_TEST) $(WIRE_TEST) $(MONITOR_TEST) $(QUAT_TEST)
+host-test: $(HOST_TEST) $(WIRE_TEST) $(MONITOR_TEST) $(QUAT_TEST) $(DEVICE_TEST)
 	@$(HOST_TEST)
 	@$(WIRE_TEST)
 	@$(MONITOR_TEST)
 	@$(QUAT_TEST)
+	@$(DEVICE_TEST)
 
 # MinGW 的 UBSan 运行库并非所有发行包都完整，因此使用 trap-on-error：
 # 编译器在任何 UB 点直接发出陷阱指令，不需要链接 sanitizer runtime。
@@ -383,6 +394,11 @@ sanitize:
 		tests/host/test_quat.c \
 		-o build/host/test_quat_ubsan.exe
 	@build/host/test_quat_ubsan.exe
+	$(HOST_CC) $(HOST_CFLAGS) -Imonitor/include -fsanitize=undefined \
+		-fsanitize-undefined-trap-on-error \
+		tests/host/test_device.c \
+		-o build/host/test_device_ubsan.exe
+	@build/host/test_device_ubsan.exe
 	$(HOST_CC) $(HOST_CFLAGS) -fsanitize=undefined \
 		-fsanitize-undefined-trap-on-error \
 		tests/host/fuzz_base.c base/quat.c \

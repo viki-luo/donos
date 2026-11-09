@@ -139,6 +139,28 @@ bool object_set_state(wire_t w, const object_state_t *st);
  */
 bool object_state(wire_t w, object_state_t *out);
 
+/* ---- 真实设备挂接（单位换算在设备里，物件侧只见 m/s 与 rad/s）---- */
+
+/*
+ * 给这条接线上的物件挂一个真实设备。
+ *
+ * 挂上之后，执行层不再自己积分位置、也不再把命令抄成实测：
+ *   - 每个周期把命令速度交给 set_velocity；
+ *   - 每个周期用 sample 读回实测位姿与速度。
+ * 因此「命令」与「实测」真正分开，监视器的偏差检测才有意义。
+ *
+ * ops 为 0 或 ctx 为 0 表示摘除设备，恢复参考实现的自积分行为。
+ * 接线无效返回 false。
+ */
+struct motion_device_ops;
+bool object_attach_device(wire_t w, const void *ops, void *ctx);
+
+/* 摘除设备（等价于 object_attach_device(w, 0, 0)）。 */
+void object_detach_device(wire_t w);
+
+/* 该接线当前是否挂了真实设备。 */
+bool object_has_device(wire_t w);
+
 /* ---- 参照系由物件自己解（设计决定 15，方案 A）---- */
 
 /* 参照链的最大深度。重复接线报告成环；超过此深度报告链过深。 */
