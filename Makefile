@@ -344,6 +344,14 @@ $(SINCOS_TEST): tests/host/test_sincos.c base/fixed.c
 # 控制回路：只读实测、只发原语。
 CONTROL_TEST := build/host/test_control.exe
 
+# 控制律热插拔：换命令来源，不搬状态。
+HANDOVER_TEST := build/host/test_handover.exe
+
+$(HANDOVER_TEST): tests/host/test_handover.c brain/handover.c \
+                  brain/include/handover.h brain/include/control.h
+	@mkdir -p build/host
+	$(HOST_CC) $(HOST_CFLAGS) -Ibrain/include tests/host/test_handover.c -o $@
+
 $(CONTROL_TEST): tests/host/test_control.c brain/control.c \
                  brain/include/control.h base/include/motion_device.h
 	@mkdir -p build/host
@@ -403,7 +411,7 @@ fuzz: $(FUZZ_TEST)
 		echo "  确定性模糊出现失败"; exit 1; \
 	fi
 
-host-test: $(HOST_TEST) $(WIRE_TEST) $(MONITOR_TEST) $(QUAT_TEST) $(DEVICE_TEST) $(WHEEL_TEST) $(JOINT_TEST) $(MO_CONF) $(SINCOS_TEST) $(CONTROL_TEST)
+host-test: $(HOST_TEST) $(WIRE_TEST) $(MONITOR_TEST) $(QUAT_TEST) $(DEVICE_TEST) $(WHEEL_TEST) $(JOINT_TEST) $(MO_CONF) $(SINCOS_TEST) $(CONTROL_TEST) $(HANDOVER_TEST)
 	@$(HOST_TEST)
 	@$(WIRE_TEST)
 	@$(MONITOR_TEST)
@@ -414,6 +422,7 @@ host-test: $(HOST_TEST) $(WIRE_TEST) $(MONITOR_TEST) $(QUAT_TEST) $(DEVICE_TEST)
 	@$(MO_CONF)
 	@$(SINCOS_TEST)
 	@$(CONTROL_TEST)
+	@$(HANDOVER_TEST)
 
 # MinGW 的 UBSan 运行库并非所有发行包都完整，因此使用 trap-on-error：
 # 编译器在任何 UB 点直接发出陷阱指令，不需要链接 sanitizer runtime。
@@ -469,6 +478,11 @@ sanitize:
 		tests/host/test_control.c \
 		-o build/host/test_control_ubsan.exe
 	@build/host/test_control_ubsan.exe
+	$(HOST_CC) $(HOST_CFLAGS) -Ibrain/include -fsanitize=undefined \
+		-fsanitize-undefined-trap-on-error \
+		tests/host/test_handover.c \
+		-o build/host/test_handover_ubsan.exe
+	@build/host/test_handover_ubsan.exe
 	$(HOST_CC) $(HOST_CFLAGS) -fsanitize=undefined \
 		-fsanitize-undefined-trap-on-error \
 		tests/host/fuzz_base.c base/quat.c \
