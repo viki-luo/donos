@@ -8,7 +8,7 @@
 #include "fixed.h"
 #include "joint_adapter.h"
 
-static bool params_valid(const joint_params_t *p)
+static bool joint_params_valid(const joint_params_t *p)
 {
         return p != 0 && p->counts_per_rad > 0;
 }
@@ -16,7 +16,7 @@ static bool params_valid(const joint_params_t *p)
 bool joint_speed_to_counts(const joint_params_t *p, motion_fixed_t omega_rad_s,
                            motion_fixed_t *counts_per_s)
 {
-        if (!params_valid(p) || counts_per_s == 0)
+        if (!joint_params_valid(p) || counts_per_s == 0)
                 return false;
 
         motion_fixed_t omega = p->invert ? -omega_rad_s : omega_rad_s;
@@ -29,7 +29,7 @@ bool joint_counts_to_angle(const joint_params_t *p, motion_fixed_t counts,
 {
         motion_fixed_t relative, angle;
 
-        if (!params_valid(p) || angle_rad == 0)
+        if (!joint_params_valid(p) || angle_rad == 0)
                 return false;
 
         /* 相对零位的计数 */
@@ -125,7 +125,7 @@ bool joint_attach(wire_t w, joint_adapter_t *ja)
         u32 unit = 0;
         u64 period = 0;
 
-        if (ja == 0 || !params_valid(&ja->params))
+        if (ja == 0 || !joint_params_valid(&ja->params))
                 return false;
 
         if (object_declared(w, &unit, &period) && period != 0)

@@ -14,7 +14,7 @@
  */
 #define TWO_PI_Q  ((motion_fixed_t)26986015494LL)
 
-static bool params_valid(const wheel_params_t *p)
+static bool wheel_params_valid(const wheel_params_t *p)
 {
         return p != 0 && p->radius > 0 && p->gear_ratio > 0 &&
                p->counts_per_rev > 0;
@@ -25,7 +25,7 @@ bool wheel_speed_to_counts(const wheel_params_t *p, motion_fixed_t v_mps,
 {
         motion_fixed_t v, omega_wheel, omega_motor, scaled;
 
-        if (!params_valid(p) || counts_per_s == 0)
+        if (!wheel_params_valid(p) || counts_per_s == 0)
                 return false;
 
         v = p->invert ? -v_mps : v_mps;
@@ -52,7 +52,7 @@ bool wheel_counts_to_speed(const wheel_params_t *p, motion_fixed_t counts_per_s,
 {
         motion_fixed_t revs, omega_motor, omega_wheel, v;
 
-        if (!params_valid(p) || v_mps == 0)
+        if (!wheel_params_valid(p) || v_mps == 0)
                 return false;
 
         /* revs/s = counts/s ÷ counts_per_rev */
@@ -179,7 +179,7 @@ bool wheel_attach(wire_t w, wheel_adapter_t *wa)
         u32 unit = 0;
         u64 period = 0;
 
-        if (wa == 0 || !params_valid(&wa->params))
+        if (wa == 0 || !wheel_params_valid(&wa->params))
                 return false;
 
         /*

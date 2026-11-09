@@ -334,6 +334,15 @@ WHEEL_TEST := build/host/test_wheel.exe
 # 关节适配器与串联链：一条接线一个关节，链条由参照系表达。
 JOINT_TEST := build/host/test_joint.exe
 
+# DONOS-MO-1 一致性套件：同一个设备无关套件必须让不同实现都通过。
+MO_CONF := build/host/conformance_mo.exe
+
+$(MO_CONF): tests/host/conformance_mo.c drivers/motion/mo_standard.c \
+            drivers/include/mo_standard.h drivers/include/wheel_adapter.h
+	@mkdir -p build/host
+	$(HOST_CC) $(HOST_CFLAGS) -Idrivers/include tests/host/conformance_mo.c \
+		drivers/motion/mo_standard.c -o $@
+
 $(JOINT_TEST): tests/host/test_joint.c drivers/motion/joint_adapter.c \
                drivers/include/joint_adapter.h base/include/motion_device.h
 	@mkdir -p build/host
@@ -379,7 +388,7 @@ fuzz: $(FUZZ_TEST)
 		echo "  确定性模糊出现失败"; exit 1; \
 	fi
 
-host-test: $(HOST_TEST) $(WIRE_TEST) $(MONITOR_TEST) $(QUAT_TEST) $(DEVICE_TEST) $(WHEEL_TEST) $(JOINT_TEST)
+host-test: $(HOST_TEST) $(WIRE_TEST) $(MONITOR_TEST) $(QUAT_TEST) $(DEVICE_TEST) $(WHEEL_TEST) $(JOINT_TEST) $(MO_CONF)
 	@$(HOST_TEST)
 	@$(WIRE_TEST)
 	@$(MONITOR_TEST)
@@ -387,6 +396,7 @@ host-test: $(HOST_TEST) $(WIRE_TEST) $(MONITOR_TEST) $(QUAT_TEST) $(DEVICE_TEST)
 	@$(DEVICE_TEST)
 	@$(WHEEL_TEST)
 	@$(JOINT_TEST)
+	@$(MO_CONF)
 
 # MinGW 的 UBSan 运行库并非所有发行包都完整，因此使用 trap-on-error：
 # 编译器在任何 UB 点直接发出陷阱指令，不需要链接 sanitizer runtime。
@@ -427,6 +437,11 @@ sanitize:
 		tests/host/test_joint.c \
 		-o build/host/test_joint_ubsan.exe
 	@build/host/test_joint_ubsan.exe
+	$(HOST_CC) $(HOST_CFLAGS) -Idrivers/include -fsanitize=undefined \
+		-fsanitize-undefined-trap-on-error \
+		tests/host/conformance_mo.c \
+		-o build/host/conformance_mo_ubsan.exe
+	@build/host/conformance_mo_ubsan.exe
 	$(HOST_CC) $(HOST_CFLAGS) -fsanitize=undefined \
 		-fsanitize-undefined-trap-on-error \
 		tests/host/fuzz_base.c base/quat.c \
