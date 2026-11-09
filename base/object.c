@@ -810,7 +810,11 @@ bool object_attach_device(wire_t w, const void *ops, void *ctx)
         if (o == 0)
                 return false;
 
-        if (ops == 0 || ctx == 0) {
+        /*
+         * 只有 ops == 0 表示摘除。ctx 允许为 0：无状态设备是合法实现，
+         * 把「没有上下文」当成「摘除设备」会让这类设备根本挂不上。
+         */
+        if (ops == 0) {
                 o->dev = 0;
                 o->dev_ctx = 0;
                 return true;

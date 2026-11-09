@@ -38,6 +38,22 @@ fixed_status_t fixed_div_checked(motion_fixed_t a, motion_fixed_t b,
                                  motion_fixed_t *out);
 
 /*
+ * Q32.32 正余弦：sin(x) 与 cos(x)，x 为弧度。
+ *
+ * 用泰勒展开加象限归约：先把角度折到 [-π/4, π/4]，再算
+ *   sin = x - x³/6 + x⁵/120 - x⁷/5040
+ *   cos = 1 - x²/2 + x⁴/24 - x⁶/720
+ * 截断误差约 1e-8，在 Q32.32 上约 40 个最低位。
+ *
+ * 存在的理由：关节的绝对角度必须表达成姿态四元数
+ * q = (cos(θ/2), 0, 0, sin(θ/2))，而姿态是 object_state 规定的旋转表示
+ * —— 把弧度塞进 position[]（那里按标准是**米**）是单位违规。
+ */
+fixed_status_t fixed_sin_cos(motion_fixed_t radians,
+                             motion_fixed_t *sin_out,
+                             motion_fixed_t *cos_out);
+
+/*
  * Integrate one Q32.32 velocity component over period_ns.
  *
  * Exact integer model:

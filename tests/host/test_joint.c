@@ -147,8 +147,21 @@ int main(void)
 
         object_state_t st;
         check("state is readable", object_state(shoulder, &st));
-        check("the measured angle is in radians",
-              near_ratio(st.position[2], Q(0.002), 200));
+        /*
+         * 关节角在**姿态四元数**里，不在 position[] 里：
+         * position 按 Q-2 是米，弧度进去就是单位违规。
+         * 0.002 rad 的半角是 0.001 rad，故 qw≈1、qz≈0.001。
+         */
+        {
+                double qw = (double)st.orientation[0] / 4294967296.0;
+                double qz = (double)st.orientation[3] / 4294967296.0;
+
+                check("the joint angle is expressed as an orientation quaternion",
+                      qw > 0.999999 && qw <= 1.000001 &&
+                      qz > 0.00099 && qz < 0.00101);
+                check("no angle leaks into position, which is metres",
+                      st.position[2] == 0);
+        }
         check("the measured rate is about 1 rad/s",
               near_ratio(st.angular[2], Q(1), 50));
 

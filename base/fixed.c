@@ -137,6 +137,113 @@ fixed_status_t fixed_div_checked(motion_fixed_t a, motion_fixed_t b,
         return FIXED_OK;
 }
 
+/*
+ * Q32.32 常量。π 取到 32 位小数位；这些是编译期常数，量级已知，
+ * 不参与溢出检查。
+ */
+#define FIXED_PI      ((motion_fixed_t)13493037705LL)   /* 3.1415926535 */
+#define FIXED_PI_2    ((motion_fixed_t)6746518852LL)    /* 1.5707963267 */
+#define FIXED_PI_4    ((motion_fixed_t)3373259426LL)    /* 0.7853981633 */
+#define FIXED_2PI     ((motion_fixed_t)26986075410LL)   /* 6.2831853071 */
+
+fixed_status_t fixed_sin_cos(motion_fixed_t radians,
+                             motion_fixed_t *sin_out,
+                             motion_fixed_t *cos_out)
+{
+        motion_fixed_t x, x2, x4, term, s, c;
+        s64 quadrant, wrapped;
+        bool swapped = false;
+
+        if (sin_out == 0 || cos_out == 0)
+                return FIXED_E_INVAL;
+
+        /*
+         * 归约到 [0, 2π)。除数是编译期常数，编译器用硬件除法或乘倒数，
+         * 不产生 libcall。
+         */
+        wrapped = radians % FIXED_2PI;
+        if (wrapped < 0)
+                wrapped += FIXED_2PI;
+
+        quadrant = wrapped / FIXED_PI_2;        /* 0..3 */
+        x = wrapped - quadrant * FIXED_PI_2;    /* [0, π/2) */
+
+        /*
+         * 把 [0, π/2) 折到 [-π/4, π/4]：x > π/4 时用 π/2 - x，并把 sin 与
+         * cos 互换（sin(r) = cos(r')，cos(r) = sin(r')）。互换发生在正象限内，
+         * 不涉及符号。
+         */
+        if (x > FIXED_PI_4) {
+                x = FIXED_PI_2 - x;
+                swapped = true;
+        }
+
+        if (fixed_mul_checked(x, x, &x2) != FIXED_OK)
+                return FIXED_E_OVERFLOW;
+        if (fixed_mul_checked(x2, x2, &x4) != FIXED_OK)
+                return FIXED_E_OVERFLOW;
+
+        /* sin = x - x³/6 + x⁵/120 - x⁷/5040 */
+        s = x;
+        if (fixed_mul_checked(x2, x, &term) != FIXED_OK ||
+            fixed_div_checked(term, (motion_fixed_t)6 << 32, &term) != FIXED_OK ||
+            fixed_sub_checked(s, term, &s) != FIXED_OK)
+                return FIXED_E_OVERFLOW;
+        if (fixed_div_checked(x4, (motion_fixed_t)120 << 32, &term) != FIXED_OK ||
+            fixed_mul_checked(term, x, &term) != FIXED_OK ||
+            fixed_add_checked(s, term, &s) != FIXED_OK)
+                return FIXED_E_OVERFLOW;
+        if (fixed_mul_checked(x4, x2, &term) != FIXED_OK ||
+            fixed_div_checked(term, (motion_fixed_t)5040 << 32, &term) != FIXED_OK ||
+            fixed_mul_checked(term, x, &term) != FIXED_OK ||
+            fixed_sub_checked(s, term, &s) != FIXED_OK)
+                return FIXED_E_OVERFLOW;
+        if (fixed_mul_checked(x4, x4, &term) != FIXED_OK ||
+            fixed_div_checked(term, (motion_fixed_t)362880 << 32, &term) != FIXED_OK ||
+            fixed_mul_checked(term, x, &term) != FIXED_OK ||
+            fixed_add_checked(s, term, &s) != FIXED_OK)
+                return FIXED_E_OVERFLOW;
+
+        /* cos = 1 - x²/2 + x⁴/24 - x⁶/720 */
+        c = (motion_fixed_t)1 << 32;
+        if (fixed_div_checked(x2, (motion_fixed_t)2 << 32, &term) != FIXED_OK ||
+            fixed_sub_checked(c, term, &c) != FIXED_OK)
+                return FIXED_E_OVERFLOW;
+        if (fixed_div_checked(x4, (motion_fixed_t)24 << 32, &term) != FIXED_OK ||
+            fixed_add_checked(c, term, &c) != FIXED_OK)
+                return FIXED_E_OVERFLOW;
+        if (fixed_mul_checked(x4, x2, &term) != FIXED_OK ||
+            fixed_div_checked(term, (motion_fixed_t)720 << 32, &term) != FIXED_OK ||
+            fixed_sub_checked(c, term, &c) != FIXED_OK)
+                return FIXED_E_OVERFLOW;
+        if (fixed_mul_checked(x4, x4, &term) != FIXED_OK ||
+            fixed_div_checked(term, (motion_fixed_t)40320 << 32, &term) != FIXED_OK ||
+            fixed_add_checked(c, term, &c) != FIXED_OK)
+                return FIXED_E_OVERFLOW;
+
+        if (swapped) {
+                motion_fixed_t tmp = s;
+
+                s = c;
+                c = tmp;
+        }
+
+        /*
+         * 旋转 k·π/2：每次 (s, c) → (c, -s)，
+         * 因为 sin(θ+π/2) = cos(θ) 且 cos(θ+π/2) = -sin(θ)。
+         */
+        for (s64 k = 0; k < quadrant; k++) {
+                motion_fixed_t tmp = c;
+
+                c = -s;
+                s = tmp;
+        }
+
+        *sin_out = s;
+        *cos_out = c;
+        return FIXED_OK;
+}
+
 fixed_status_t fixed_velocity_step_checked(motion_fixed_t velocity,
                                            u64 period_ns,
                                            motion_fixed_t carry,

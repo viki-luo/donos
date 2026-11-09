@@ -80,9 +80,25 @@ static bool joint_sample(void *ctx, object_state_t *out)
         for (u8 i = 0; i < 4; i++)
                 out->orientation[i] = 0;
 
-        /* 绝对角度：编码器计数直接决定姿态位置 */
-        if (joint_counts_to_angle(&ja->params, counts, &angle))
-                out->position[2] = angle;
+        /*
+         * 绝对角度写成**姿态四元数**，不写 position[]：
+         * position 按 DONOS-MO-1 的 Q-2 是**米**，把弧度塞进去是单位违规。
+         * 姿态是 object_state 规定的旋转表示，所以关节角属于 orientation。
+         *
+         * q = (cos(θ/2), 0, 0, sin(θ/2)) —— 绕 z 轴转 θ。
+         * 取半角需要一次除法，三角函数用定点实现。
+         */
+        if (joint_counts_to_angle(&ja->params, counts, &angle)) {
+                motion_fixed_t half, sh, ch;
+
+                if (fixed_div_checked(angle, (motion_fixed_t)2 << 32, &half) == FIXED_OK &&
+                    fixed_sin_cos(half, &sh, &ch) == FIXED_OK) {
+                        out->orientation[0] = ch;
+                        out->orientation[1] = 0;
+                        out->orientation[2] = 0;
+                        out->orientation[3] = sh;
+                }
+        }
 
         /*
          * 第一次采样只建立基准：没有「上一次计数」就没有速度可言。

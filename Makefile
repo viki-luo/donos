@@ -334,6 +334,21 @@ WHEEL_TEST := build/host/test_wheel.exe
 # 关节适配器与串联链：一条接线一个关节，链条由参照系表达。
 JOINT_TEST := build/host/test_joint.exe
 
+# 定点正余弦：关节角写成姿态四元数需要它。
+SINCOS_TEST := build/host/test_sincos.exe
+
+$(SINCOS_TEST): tests/host/test_sincos.c base/fixed.c
+	@mkdir -p build/host
+	$(HOST_CC) $(HOST_CFLAGS) tests/host/test_sincos.c -o $@
+
+# 控制回路：只读实测、只发原语。
+CONTROL_TEST := build/host/test_control.exe
+
+$(CONTROL_TEST): tests/host/test_control.c brain/control.c \
+                 brain/include/control.h base/include/motion_device.h
+	@mkdir -p build/host
+	$(HOST_CC) $(HOST_CFLAGS) -Ibrain/include tests/host/test_control.c -o $@
+
 # DONOS-MO-1 一致性套件：同一个设备无关套件必须让不同实现都通过。
 MO_CONF := build/host/conformance_mo.exe
 
@@ -388,7 +403,7 @@ fuzz: $(FUZZ_TEST)
 		echo "  确定性模糊出现失败"; exit 1; \
 	fi
 
-host-test: $(HOST_TEST) $(WIRE_TEST) $(MONITOR_TEST) $(QUAT_TEST) $(DEVICE_TEST) $(WHEEL_TEST) $(JOINT_TEST) $(MO_CONF)
+host-test: $(HOST_TEST) $(WIRE_TEST) $(MONITOR_TEST) $(QUAT_TEST) $(DEVICE_TEST) $(WHEEL_TEST) $(JOINT_TEST) $(MO_CONF) $(SINCOS_TEST) $(CONTROL_TEST)
 	@$(HOST_TEST)
 	@$(WIRE_TEST)
 	@$(MONITOR_TEST)
@@ -397,6 +412,8 @@ host-test: $(HOST_TEST) $(WIRE_TEST) $(MONITOR_TEST) $(QUAT_TEST) $(DEVICE_TEST)
 	@$(WHEEL_TEST)
 	@$(JOINT_TEST)
 	@$(MO_CONF)
+	@$(SINCOS_TEST)
+	@$(CONTROL_TEST)
 
 # MinGW 的 UBSan 运行库并非所有发行包都完整，因此使用 trap-on-error：
 # 编译器在任何 UB 点直接发出陷阱指令，不需要链接 sanitizer runtime。
@@ -442,6 +459,16 @@ sanitize:
 		tests/host/conformance_mo.c \
 		-o build/host/conformance_mo_ubsan.exe
 	@build/host/conformance_mo_ubsan.exe
+	$(HOST_CC) $(HOST_CFLAGS) -fsanitize=undefined \
+		-fsanitize-undefined-trap-on-error \
+		tests/host/test_sincos.c \
+		-o build/host/test_sincos_ubsan.exe
+	@build/host/test_sincos_ubsan.exe
+	$(HOST_CC) $(HOST_CFLAGS) -Ibrain/include -fsanitize=undefined \
+		-fsanitize-undefined-trap-on-error \
+		tests/host/test_control.c \
+		-o build/host/test_control_ubsan.exe
+	@build/host/test_control_ubsan.exe
 	$(HOST_CC) $(HOST_CFLAGS) -fsanitize=undefined \
 		-fsanitize-undefined-trap-on-error \
 		tests/host/fuzz_base.c base/quat.c \
