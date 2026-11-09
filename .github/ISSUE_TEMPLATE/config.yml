@@ -1,11 +1,11 @@
 blank_issues_enabled: false
 contact_links:
   - name: 安全问题 / Security vulnerability
-    url: https://github.com/OWNER/REPO/security/advisories/new
+    url: https://github.com/viki-luo/donos/security/advisories/new
     about: 请勿公开报告漏洞。/ Please do not report vulnerabilities publicly.
   - name: 使用与设计问答 / Usage and design questions
-    url: https://github.com/OWNER/REPO/blob/main/SUPPORT.md
+    url: https://github.com/viki-luo/donos/blob/main/SUPPORT.md
     about: 问之前先看这里。/ Read this before asking.
   - name: 一般讨论 / General discussion
-    url: https://github.com/OWNER/REPO/discussions
+    url: https://github.com/viki-luo/donos/discussions
     about: 设计取舍、想法、以及不成形的疑问。/ Design trade-offs and open-ended questions.

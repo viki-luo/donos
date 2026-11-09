@@ -17,15 +17,15 @@
 ## 提问与讨论 / Questions and discussion
 
 - **用法问题、设计疑问** → 开一个
-  [Design discussion](https://github.com/OWNER/REPO/issues/new?template=design_discussion.md)
+  [Design discussion](https://github.com/viki-luo/donos/issues/new?template=design_discussion.md)
 - **可复现的缺陷** → 开一个
-  [Bug report](https://github.com/OWNER/REPO/issues/new?template=bug_report.md)
+  [Bug report](https://github.com/viki-luo/donos/issues/new?template=bug_report.md)
 - **想要的能力** → 开一个
-  [Feature request](https://github.com/OWNER/REPO/issues/new?template=feature_request.md)
+  [Feature request](https://github.com/viki-luo/donos/issues/new?template=feature_request.md)
 - **安全漏洞** → **不要**开公开 Issue，走 [SECURITY.md](SECURITY.md)
 
-> 上面链接里的 `OWNER/REPO` 需替换为本仓库的实际地址。
-> *Replace `OWNER/REPO` in the links above with the real repository path.*
+> 上面链接里的 `viki-luo/donos` 需替换为本仓库的实际地址。
+> *Replace `viki-luo/donos` in the links above with the real repository path.*
 
 ## 提问前请准备好 / Before asking, please have ready
 
@@ -78,10 +78,10 @@ respond, but please allow delays on the order of weeks.*
 | Report a vulnerability | [SECURITY.md](SECURITY.md) |
 
 **Questions and design debates** → open a
-[Design discussion](https://github.com/OWNER/REPO/issues/new?template=design_discussion.md).
+[Design discussion](https://github.com/viki-luo/donos/issues/new?template=design_discussion.md).
 **Reproducible defects** → open a
-[Bug report](https://github.com/OWNER/REPO/issues/new?template=bug_report.md).
+[Bug report](https://github.com/viki-luo/donos/issues/new?template=bug_report.md).
 **Requested capabilities** → open a
-[Feature request](https://github.com/OWNER/REPO/issues/new?template=feature_request.md).
+[Feature request](https://github.com/viki-luo/donos/issues/new?template=feature_request.md).
 **Security vulnerabilities** → do **not** open a public issue; follow
 [SECURITY.md](SECURITY.md).
