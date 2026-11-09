@@ -88,6 +88,55 @@ fixed_status_t fixed_mul_checked(motion_fixed_t a, motion_fixed_t b,
         return FIXED_OK;
 }
 
+fixed_status_t fixed_div_checked(motion_fixed_t a, motion_fixed_t b,
+                                 motion_fixed_t *out)
+{
+        u64 ua, ub;
+        u128 num, rem, q;
+        bool neg;
+        int k;
+
+        if (out == 0)
+                return FIXED_E_INVAL;
+        if (b == 0)
+                return FIXED_E_INVAL;
+
+        /*
+         * 取幅值时不能直接取负：-INT64_MIN 会溢出。
+         * 用 -(x + 1) + 1 的写法绕开这个边界。
+         */
+        neg = (a < 0) != (b < 0);
+        ua = (u64)(a < 0 ? -(a + 1) : a) + (a < 0 ? 1u : 0u);
+        ub = (u64)(b < 0 ? -(b + 1) : b) + (b < 0 ? 1u : 0u);
+
+        /*
+         * 计算 (ua << 32) / ub。
+         *
+         * 只做移位、比较与减法，**不做除法**：一旦写成 __int128 除法，
+         * 编译器会调用 __udivti3，而裸机链接里没有这个运行时符号。
+         * 移位与比较用 128 位是安全的，那是编译器内联的指令。
+         */
+        num = ((u128)ua) << 32;
+        rem = 0;
+        q = 0;
+
+        for (k = 95; k >= 0; k--) {
+                rem = (rem << 1) | ((num >> k) & 1u);
+                q <<= 1;
+                if (rem >= (u128)ub) {
+                        rem -= (u128)ub;
+                        q |= 1u;
+                }
+        }
+
+        /* 商超出正半区就是溢出：宁可拒绝，也不返回一个假值。 */
+        if (q > (u128)INT64_MAX)
+                return FIXED_E_OVERFLOW;
+
+        *out = neg ? -(motion_fixed_t)q : (motion_fixed_t)q;
+        return FIXED_OK;
+}
+
 fixed_status_t fixed_velocity_step_checked(motion_fixed_t velocity,
                                            u64 period_ns,
                                            motion_fixed_t carry,
