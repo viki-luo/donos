@@ -36,45 +36,23 @@ jobs:
           qemu-system-x86_64 --version
           qemu-system-riscv64 --version
 
-      - name: 构建 / Build
-        run: make ARCH=${{ matrix.arch }}
+      - name: 构建证据镜像 / Build the evidence image
+        # SELFTEST=1 是关键：发布镜像不含任何自检与基准代码，
+        # 对着它断言自检输出永远不会成立。
+        run: make ARCH=${{ matrix.arch }} SELFTEST=1
 
-      - name: 启动并采集串口 / Boot and capture serial
-        run: |
-          # 内核不主动退出，timeout(124) 是正常结束；其他非零视为启动失败。
-          # The kernel never exits on its own: 124 is the normal end, any other
-          # non-zero status means boot failed.
-          set -eu
-          rm -f serial.log serial.txt
-          rc=0
-          case "${{ matrix.arch }}" in
-            x86_64)
-              timeout 30 qemu-system-x86_64 \
-                -kernel build/x86_64/donos.bin \
-                -m 256M \
-                -serial file:serial.log \
-                -display none -no-reboot -no-shutdown || rc=$?
-              ;;
-            riscv64)
-              timeout 30 qemu-system-riscv64 \
-                -machine virt -bios default -m 256M \
-                -kernel build/riscv64/donos.bin \
-                -device e1000 \
-                -serial file:serial.log \
-                -display none -no-reboot || rc=$?
-              ;;
-          esac
-          if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ]; then
-            echo "::error::QEMU exited with $rc, not a normal timeout"
-            exit 1
-          fi
-          test -s serial.log
-          tr -d "\r" < serial.log > serial.txt
-          cat serial.txt
-
-      - name: 断言自检与测量 / Assert self-test and measurements
+      - name: 运行门禁并断言 / Run the same gate as local, then assert
+        # tools/bench.sh 就是 `make check` 用的那个脚本：CI 与本地跑同一件事，
+        # 否则「CI 绿」只是巧合。
         run: |
           set -eux
+          SELFTEST=1 tools/bench.sh ${{ matrix.arch }}
+
+          log=build/bench-${{ matrix.arch }}.log
+          test -s "$log"
+          tr -d "\r" < "$log" > serial.txt
+          cat serial.txt
+
           # 1. 语义自检零失败
           grep -q "^  failures = 0$" serial.txt
           # 2. 基准压力测试零失败
@@ -83,10 +61,15 @@ jobs:
           for p in "base_apply accepted" "base_apply rejected" \
                    "object_resolve, chain of 1" "object_resolve, chain of 8" \
                    "full run over" "one 100 Hz tick period" \
-                   "worst run share of a tick" "capacity =" "churn cycles ="; do
+                   "max run share of a tick" "capacity =" "churn cycles ="; do
             grep -q "$p" serial.txt
           done
-          # 4. 保护状态必须自报
+          # 4. 尾延迟预算
+          grep -q "^  latency p99.9" serial.txt
+          # 5. 长期运行与中断风暴证据
+          grep -q "^  endurance ticks = " serial.txt
+          grep -q "^  storm ticks = " serial.txt
+          # 6. 保护状态必须自报
           grep -q "protection: what the MMU actually enforces" serial.txt
 
       - name: 保存串口日志 / Save serial log

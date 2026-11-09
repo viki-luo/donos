@@ -1,0 +1,377 @@
+=== DONos ===
+[boot] magic = 0x00001580
+[boot] info  = 0x00000560
+
+--- platform ---
+  idt   installed (48 vectors)
+  pic   remapped to 0x20/0x28, only IRQ0 open
+  pit   100 Hz
+  irq   enabled, timer ticking
+
+--- bus discovery (PCI) ---
+  00.0  8086:1237  [bridge 06/00]  wire 1/1
+  01.0  8086:7000  [bridge 06/01]  wire 2/1
+  01.1  8086:7010  [storage 01/01 if=80]  wire 3/1
+  01.3  8086:7113  [bridge 06/80]  wire 4/1
+  02.0  1234:1111  [display 03/00]  wire 5/1
+  03.0  8086:100e  [network 02/00]  wire 6/1
+  discovered 6 object(s)
+
+--- protection: what the MMU actually enforces ---
+  cr0 = 0x0000000080000011  (PG=1 WP=0)
+  cr4 = 0x0000000000000020  (PAE=1)
+  cr3 = 0x0000000000070000
+  pd[0] = 0x00000000000000e3  (P=1 RW=1 US=0 NX=0)
+  pd[1] = 0x0000000000200083  (P=1 RW=1 US=0 NX=0)
+  => identity mapped: every page writable and executable,
+     no user/supervisor split. The base is not sandboxed by the MMU.
+
+--- MMU: what the page tables now enforce ---
+
+  ok   NXE is supported by this CPU and now enabled
+  note: 4 KiB pages built in the kernel's 2 MiB region = 308
+  ok   the kernel region is now mapped with 4 KiB pages
+  note: large pages found non-executable = 511 of 511 available
+  ok   every remaining 2 MiB page is non-executable
+  ok   CR0.WP is now set (writes must honour the read-only bit)
+  ok   the kernel region is a page table, not a 2 MiB page
+  ok   a .text page is executable and not writable
+  ok   a .rodata page is read-only and not executable
+  ok   a .data page is writable and not executable
+  ok   hardware blocks a write to a read-only page (error 0x03)
+  ok   the rejected write leaves the byte unchanged
+  ok   the original PDE permissions are restored after the RO probe
+  ok   the NX scratch page is present and non-executable
+  note: fetch/NX error=0x00000011 rip=0x0000000002a00000 cr2=0x0000000002a00000
+  ok   instruction fetch from an NX page raises #PF 0x11
+  ok   the NX page directory entry stayed unchanged
+  note: write/.text error=0x00000003 cr2=0x0000000000101000
+  ok   writing to a .text page is blocked by the page table
+  note: fetch/.data error=0x00000011 cr2=0x0000000000124110
+  ok   fetching instructions from a .data page is blocked
+  ok   normal execution resumes after both expected #PF probes
+
+  mmu failures = 0
+
+--- primitives ---
+  A = wire 7/1, B = wire 8/1
+
+  ok   A moves relative to the world
+  ok   A is not commanded to be still
+  ok   B is still relative to A (motion == 0)
+  ok   B is commanded to be still relative to A
+  ok   unknown frame is rejected
+  ok   unknown wire is rejected
+  ok   dof over the limit is rejected
+  ok   null event is rejected
+  ok   departed wire is no longer valid
+  ok   event to a departed wire is rejected
+  ok   a departed frame is rejected
+
+--- unified model: a brain is an ordinary wire ---
+
+  brain = wire 7/2, hand = wire 8/2, foot = wire 9/1
+
+  ok   brain attaches through the same base_arrive
+  ok   brain occupies no special slot
+  ok   base_apply drives the brain like any object
+  ok   thinking is motion (brain motion[0] == 1)
+  ok   hand moves (motion[0] == 50)
+  ok   foot moves (motion[0] == 30)
+  note: base_arrive() takes no arguments and motion_event_t carries
+        no 'kind' field,
+        so the base is structurally unable to tell them apart
+  ok   old brain departed cleanly
+  ok   new brain arrives as an ordinary wire
+  ok   limbs kept their motion through the brain swap
+  new brain reads the limb directly: hand motion[0] = 50
+  (this is what 'objects are the memory' means)
+  ok   a brain can itself be driven by a higher brain
+  note: the same wire is both a brain and a drivable object;
+        'brain' is a role, not a type in the base
+
+--- R8: an object describes and holds its own state ---
+
+  part = wire 7/4
+
+  ok   capability is unavailable before the object describes itself
+  ok   a well-formed description is accepted
+  ok   capability becomes readable after describing
+  ok   limits survive the round trip
+  ok   mass survives the round trip
+  ok   pose is readable back
+  ok   orientation is a unit quaternion (w == 1)
+  note: none of this is reachable from base.h --
+        the base's whole surface is arrive/depart/apply/valid
+
+--- R5: objects resolve their own frame (option A) ---
+
+  ok   B resolves to 105 relative to the world
+  ok   C resolves through a two-level chain to 107
+  ok   still relative to A resolves to A's own motion (100)
+  ok   the base accepts a cyclic frame (it cannot see chains)
+  ok   the object side detects the cycle
+  ok   a departed frame breaks the chain
+
+--- R5: motion rotates with the frame's orientation ---
+
+  ok   an unrotated frame leaves the motion unchanged (10, 0, 0)
+  ok   a frame turned 180 deg about z gives (-10, 0, 0)
+  ok   a frame turned 90 deg about z gives (0, 10, 0)
+  ok   still relative to a rotated frame stays still
+
+--- execution model: velocity integrated at each object's own period ---
+
+  ok   fast object stepped 9 times in 9 ms
+  ok   slow object stepped 3 times in 9 ms
+  ok   an object without a declared period is never stepped
+  ok   velocity integrates per period (9 steps x v dt)
+  ok   slow integrates 3 steps x v dt
+  ok   same velocity at 1 ms and 3 ms covers the same distance in 9 ms
+  ok   an object still relative to fast has no pose of its own
+  ok   ...yet resolves to fast's world velocity
+  ok   a late run steps once instead of catching up
+
+--- conformance: R1-R3 ---
+
+  ok   R1 a zero-motion event makes the object still
+  ok   R1 a zero-dof event is also accepted as still
+  ok   R2 a fresh event is accepted
+  ok   R2 the object keeps stepping after the window has passed
+  ok   R2 position keeps integrating past the window (5 steps x v dt)
+  ok   R3 declared unit and period are readable
+  ok   R3 a departed object no longer declares anything
+
+--- checked Q32.32 arithmetic boundaries ---
+
+  ok   checked add rejects INT64_MAX + 1
+  ok   checked add rejects INT64_MIN - 1
+  ok   checked subtract rejects INT64_MIN - 1
+  ok   checked Q32.32 multiply rejects an unrepresentable result
+  ok   3 m/s over one second is integrated without signed overflow
+  ok   INT64_MAX velocity over one second remains representable
+  ok   INT64_MIN velocity over one second remains representable
+  ok   an invalid carry boundary is refused
+
+--- freshness: a stale command is refused, never executed ---
+
+  ok   a zero-length window is rejected
+  ok   an event issued in the future is rejected
+  ok   an expired event is refused with E_DEADLINE
+  ok   a window that wraps the clock counter is rejected
+  ok   an event exactly at its deadline is still accepted
+  ok   a fresh event inside its window is accepted
+
+--- execution clock: rollback, overflow, first run ---
+
+  ok   a forward run advances the execution clock
+  ok   a run that goes backwards in time is refused
+  ok   the same instant is not a rollback
+  ok   a fresh event is accepted before the first run
+  ok   the first run after plugging only schedules
+  ok   the next period boundary performs exactly one step
+  ok   a null step counter is refused
+  ok   a scheduling addition that would wrap the clock is refused
+  ok   a refused scheduled time leaves the clock usable
+
+--- dof tail and declared capability ---
+
+  ok   an event with a polluted tail is still accepted
+  ok   the tail outside dof is normalised to zero
+  ok   the declared component is kept
+  ok   a still child is accepted
+  ok   the tail cannot leak through the frame chain
+  ok   a description with dof over the limit is refused
+  ok   a refused description leaves the object undeclared
+  ok   a description with an inverted interval is refused
+  ok   a description with a negative rate is refused
+  ok   a description with a negative mass is refused
+  ok   still undeclared after four refused descriptions
+  ok   a well-formed description is accepted
+  ok   the inactive axes of a description are zeroed
+  ok   a command above the declared rate is refused with E_LIMIT
+  ok   a command exactly at the declared rate is accepted
+  ok   the same rate in the negative direction is accepted
+  ok   an over-rate command in the negative direction is refused
+  ok   INT64_MIN cannot slip past the rate gate
+  ok   a refused command does not disturb the accepted motion
+  ok   the tail is not rate-checked because it is not commanded
+  ok   an object that declared nothing is not rate-limited
+
+--- commanded / resolved / measured ---
+
+  ok   a turntable spinning about z is accepted
+  ok   a rider still relative to the turntable is accepted
+  ok   the rider's world linear velocity is omega x r = (0, 1, 0)
+  ok   the rider's world angular velocity is the turntable's
+  ok   the rider's own commanded motion stays zero
+  ok   the rider's own measured position stays at radius 1
+  ok   doubling the measured radius doubles the tangential speed
+  ok   the turntable is now a purely translating frame
+  ok   the rider is still relative to it
+  ok   a carried object accumulates no pose of its own
+  ok   but its resolved world velocity is the frame's
+  ok   the rider is given its own velocity
+  ok   measured linear velocity reflects the command
+  ok   measured angular velocity reflects the command
+  ok   a third object takes a non-dividing velocity
+  ok   an externally written pose reads back exactly
+  ok   a fresh 1 m/s command is accepted
+  ok   the stale carry does not leak into the new trajectory
+
+--- pose validity and resolve failure causes ---
+
+  ok   an all-zero orientation means 'no pose declared' and is accepted
+  ok   a scaled quaternion (2,0,0,0) is refused
+  ok   a non-unit quaternion (1,1,0,0) is refused
+  ok   a quaternion with a huge component is refused without overflow
+  ok   a refused pose leaves the previous state untouched
+  ok   a properly normalised quaternion is accepted
+  ok   an accepted pose reads back
+  ok   resolving a dead wire reports NO_OBJECT
+  ok   resolving with a null output reports INVAL
+  ok   a departed frame reports BROKEN_FRAME
+  ok   a two-object cycle reports CYCLE
+  ok   an over-long but acyclic chain reports DEPTH, not CYCLE
+
+--- hot-plug: a reused slot carries no leftovers ---
+
+  ok   the first occupant really did accumulate state
+  ok   the departed handle is refused by the base
+  note: previous wire 7/18, new wire 7/19
+
+  ok   the new occupant is a different, live handle
+  ok   it inherits no command
+  ok   it inherits no event count
+  ok   it inherits no pose
+  ok   it inherits no capability declaration
+  ok   its own declared unit and period are what it asked for
+  ok   it has not been stepped yet
+
+  failures = 0
+
+=== measurement: cost of the single primitive ===
+
+  free object slots on entry : 58
+
+  base_apply accepted : 137.00 counter ticks/call over 200000 calls
+  base_apply rejected : 25.00 counter ticks/call
+
+=== measurement: reference-chain resolution ===
+
+  object_resolve, chain of 1 objects (each turned): 101.00 counter ticks/call
+  object_resolve, chain of 8 objects (each turned): 15924.09 counter ticks/call
+
+=== measurement: worst-case tick ===
+
+  full run over 58 objects (every free slot) on 8 turned chains
+  latency average : 736826 counter ticks
+  latency p50     : 748082 counter ticks
+  latency p99     : 749699 counter ticks
+  latency p99.9   : 749699 counter ticks
+  latency max     : 749699 counter ticks
+  latency histogram (power-of-two counter ticks):
+    2^18 bucket : 99 samples
+    2^19 bucket : 1901 samples
+  one 100 Hz tick period : 8288665 counter ticks
+  average run share of a tick : 8.88%
+  p99.9 run share of a tick  : 9.04%
+  max run share of a tick    : 9.04%
+  ok   latency budget: p99.9 is below 50% of one tick
+  ok   latency budget: max is below 75% of one tick
+
+=== endurance: 1000 scheduled ticks, monitored ===
+
+  ok   endurance: the 3 m/s command is accepted
+  ok   endurance: the 1 m/s command is accepted
+  ok   endurance: the 1 rad/s spin is accepted
+  ok   endurance: the travel limit is declared
+  ok   endurance: the monitor watches the victim
+  ok   endurance: the monitor watches the survivor
+  endurance ticks = 1000, steps = 4301
+  ok   endurance: the execution clock advanced exactly 10 s
+  ok   endurance: every scheduled step executed
+  ok   endurance: 3 m/s for 10 s lands exactly on 30 m
+  ok   endurance: the limited axis holds exactly at +4 m
+  ok   endurance: refused steps still count as executed
+  ok   endurance: the spin never translates
+  ok   endurance: the pose is still a unit quaternion after 1000 steps
+  ok   endurance: the spin stayed about z only
+  ok   endurance: the departed wire was reported exactly once
+  ok   endurance: no drift, resolve, rate or clock fault in 1000 polls
+  ok   endurance: the monitor still watches the survivor to the end
+
+=== interrupt storm: 8000 Hz burst, then nominal restore ===
+
+  storm ticks = 500, spin iterations = 6240764
+  ok   storm: the burst delivered its full tick count
+  ok   storm: the burst really ran far faster than the nominal rate
+  ok   storm: the nominal tick rate is restored
+  ok   storm: ticks keep advancing after the burst
+  ok   storm: the execution layer still advances afterwards
+
+=== stress: capacity, churn, forged handles ===
+
+  ok   plugging past capacity fails closed (WIRE_NONE)
+       capacity = 54 wires; rejection cost 204 counter ticks (one failed scan)
+  ok   a full table leaves existing wires intact
+  ok   a reused slot yields a different handle
+  ok   the departed handle stays dead
+  ok   the base rejects motion on a dead handle
+  ok   seven forged handle shapes are all refused
+  ok   churn: generation advances on every reuse
+  ok   churn: the first handle captured is long dead
+       churn cycles = 20000
+
+  bench failures = 0
+
+--- brain hot swap: the source of events changes, the base does not notice ---
+
+  ok   a brain attaches as an ordinary wire
+  ok   the brain's command reaches the target
+  ok   the resolved world velocity matches the command
+  ok   the target actually advanced while brain A steered
+  ok   the old brain's wire is gone
+  ok   the target keeps moving on the last accepted command
+  ok   it did not lose the position it had reached
+  ok   a late event from the departed brain is refused as expired
+  ok   and the refusal did not overwrite the live command
+  ok   the new brain attaches without any handover state
+  new command (m/s) x 2^32 = -0 (negative means it reversed)
+  ok   the new brain reversed the motion, decided from the object's own position
+  ok   the new command replaced the old one instead of adding to it
+  ok   a brain is itself an ordinary object and can be driven
+
+  brain failures = 0
+
+--- out-of-base monitor: observation without authority ---
+
+  ok   the caller advances execution successfully
+  ok   a healthy scene produces no events
+  ok   poll preserves state, execution clock and step count
+  ok   an unregistered departure is reported as WIRE_LOST
+  ok   a registered departure is not reported as a fault
+  ok   a cycle is reported as RESOLVE, not silently ignored
+  ok   a measured speed above the declared limit is reported
+  ok   INT64_MIN measured speed reports RATE without signed overflow
+  ok   a refused instant is reported as CLOCK
+
+  monitor failures = 0
+
+--- live: PIT ticks drive the execution layer ---
+  after 1 s of real time:
+    arm  steps = 99, position (m) = 2
+    hand steps = 99, position (m) = 0  (still relative to arm)
+  note: one tick fewer than ticks elapsed, because the
+        first sighting only schedules (no free step),
+        and a late run does not catch up (decision 16)
+
+[live] objects keep moving; the base stays idle
+
+[swap] detaching brain 'cruise', attaching 'shuttle'
+  carriage position at swap (m) = 1.989
+  (the new brain will read this from the object, not from a handover)
+  new brain commanded (m/s) = -0.500, i.e. the opposite direction
+  [swap] after 1 s under the new brain: carriage position (m) = 1.490, command (m/s) = -0.500, steps = 299, decisions = 101
+  (one second at the new command moved it back 0.5 m; the base never
+   learned that a brain was replaced)

@@ -51,7 +51,7 @@ DONos 当前原型已经证明其核心模型可运行：基座只管理接线�
 - x86_64 使用 TSC。
 - riscv64 使用 10 MHz `time` CSR，一格为 100 ns。
 - 绝对计数值受 QEMU 和宿主机影响，不能当作真实芯片的纳秒性能承诺。
-- `worst run share of a tick` 使用同一个计数器测量分子和分母，是本报告最可靠的性能指标。
+- `max run share of a tick`（旧称 `worst run share`）使用同一个计数器测量分子和分母，是本报告最可靠的性能指标；尾延迟门禁按 p50 / p99 / p99.9 / max 报四个分位数。
 
 复现命令：
 

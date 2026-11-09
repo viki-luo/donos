@@ -51,7 +51,7 @@ Measurements execute inside the target kernel:
 - x86_64 uses the TSC.
 - riscv64 uses the 10 MHz `time` CSR, with 100 ns resolution.
 - Absolute counter values depend on QEMU and the host and are not silicon nanosecond claims.
-- `worst run share of a tick` measures numerator and denominator with the same counter. It is the most defensible performance metric in this report.
+- `max run share of a tick` (formerly `worst run share`) measures numerator and denominator with the same counter and is the most defensible metric in this report; the tail-latency gate reports p50, p99, p99.9 and max.
 
 Reproduce with:
 
