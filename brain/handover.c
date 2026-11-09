@@ -49,6 +49,22 @@ bool control_install(control_source_t *cs, control_kind_t kind, wire_t w,
         return true;
 }
 
+bool control_install_framed(control_source_t *cs, control_kind_t kind, wire_t w,
+                            wire_t frame, u64 period_ns, motion_fixed_t target,
+                            motion_fixed_t gain, motion_fixed_t limit)
+{
+        if (!control_install(cs, kind, w, period_ns, target, gain, limit))
+                return false;
+
+        if (!control_set_frame(&cs->loop, frame)) {
+                /* 参照系无效：这次安装整体失败，不能留下半装好的控制器 */
+                control_uninstall(cs);
+                return false;
+        }
+
+        return true;
+}
+
 void control_uninstall(control_source_t *cs)
 {
         if (cs == 0)

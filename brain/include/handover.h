@@ -41,6 +41,14 @@ bool control_install(control_source_t *cs, control_kind_t kind, wire_t w,
                      u64 period_ns, motion_fixed_t target,
                      motion_fixed_t gain, motion_fixed_t limit);
 
+/*
+ * 同上，但指定命令的参照系。串联关节必须用它 —— 膝关节的命令相对髋关节，
+ * 而不是相对世界。
+ */
+bool control_install_framed(control_source_t *cs, control_kind_t kind, wire_t w,
+                            wire_t frame, u64 period_ns, motion_fixed_t target,
+                            motion_fixed_t gain, motion_fixed_t limit);
+
 /* 摘掉当前控制律（物件不再被命令，直到有新的来源）。 */
 void control_uninstall(control_source_t *cs);
 

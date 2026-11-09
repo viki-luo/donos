@@ -55,6 +55,7 @@ bool wheel_control_init(control_loop_t *c, wire_t w, u64 period_ns,
                 return false;
 
         c->wire = w;
+        c->frame = FRAME_WORLD;
         c->period_ns = period_ns;
         c->target = target_speed;
         c->gain = gain;
@@ -104,7 +105,7 @@ bool wheel_control_step(control_loop_t *c, u64 now_ns)
         for (u8 i = 0; i < MOTION_DOF_MAX; i++)
                 ev.motion[i] = 0;
         ev.wire = c->wire;
-        ev.frame = FRAME_WORLD;
+        ev.frame = c->frame;
         ev.issued_at_ns = now_ns;
         ev.duration_ns = c->period_ns * 2u;     /* 两拍窗口：允许丢一拍 */
         ev.dof = 1;
@@ -131,6 +132,7 @@ bool joint_control_init(control_loop_t *c, wire_t w, u64 period_ns,
                 return false;
 
         c->wire = w;
+        c->frame = FRAME_WORLD;
         c->period_ns = period_ns;
         c->target = target_angle;
         c->gain = gain;
@@ -249,6 +251,18 @@ bool joint_angle_from_orientation(const motion_fixed_t q[4],
         return true;
 }
 
+bool control_set_frame(control_loop_t *c, wire_t frame)
+{
+        if (c == 0)
+                return false;
+
+        /* WIRE_NONE 表示「相对世界」 */
+        c->frame = (frame == WIRE_NONE) ? FRAME_WORLD : frame;
+
+        /* 参照系必须当下有效，否则命令会静默落到一个死句柄上 */
+        return base_wire_valid(c->frame);
+}
+
 bool joint_control_step(control_loop_t *c, u64 now_ns)
 {
         object_state_t st;
@@ -273,7 +287,7 @@ bool joint_control_step(control_loop_t *c, u64 now_ns)
         for (u8 i = 0; i < MOTION_DOF_MAX; i++)
                 ev.motion[i] = 0;
         ev.wire = c->wire;
-        ev.frame = FRAME_WORLD;
+        ev.frame = c->frame;
         ev.issued_at_ns = now_ns;
         ev.duration_ns = c->period_ns * 2u;
         ev.dof = 6;

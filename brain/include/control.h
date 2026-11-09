@@ -25,6 +25,12 @@
 /* 控制器的统一形状：目标、增益、限幅。类型不写进结构 —— 结构只描述回路。 */
 typedef struct {
         wire_t         wire;          /* 被控的那条接线 */
+        /*
+         * 命令的参照系。默认 FRAME_WORLD；串联关节（膝关节相对髋关节）
+         * 必须能改成父接线的句柄 —— 命令「相对谁动」是命令的一部分，
+         * 写死成世界就无法表达串联链。
+         */
+        wire_t         frame;
         u64            period_ns;     /* 控制器自己的节拍（与物件周期可不同） */
         motion_fixed_t target;        /* 目标：线速度 m/s 或角度 rad */
         motion_fixed_t gain;          /* P 增益（无量纲） */
@@ -54,6 +60,13 @@ bool wheel_control_init(control_loop_t *c, wire_t w, u64 period_ns,
  * 「没有命令」和「命令为零」是两件不同的事。
  */
 bool wheel_control_step(control_loop_t *c, u64 now_ns);
+
+/*
+ * 设置命令的参照系。必须在第一次 step 之前调用。
+ *
+ * 串联关节的父接线传进来即可；传 WIRE_NONE 恢复为世界。
+ */
+bool control_set_frame(control_loop_t *c, wire_t frame);
 
 /* 位置环：误差 = 目标角 − 实测角（取自姿态四元数）；输出角速度命令 */
 bool joint_control_init(control_loop_t *c, wire_t w, u64 period_ns,
