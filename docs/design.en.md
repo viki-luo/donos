@@ -128,6 +128,35 @@ two `object_run()` calls, judging against a stale beat lets a long-expired comma
 a freshly issued one can be classified as "from the future". Neither the base nor the object stores that instant —
 it is just an argument to this call.
 
+#### Not implemented: timed motion ("keep moving for N seconds")
+
+**This must be stated plainly, or the documentation misleads.**
+
+Decision 10 froze a **command freshness window**: a command must be accepted
+before `issued_at_ns + duration_ns`. That answers "is this command still valid",
+**not** "make it move for that long".
+
+The original requirement said the base should let an object be still or moving,
+and **for how long**. Read literally that means "run for N seconds then stop",
+and that semantics is **not implemented, and should not live in the base**:
+
+> If the base executed "run 2 s then stop", the base would be judging stillness.
+> The premise, taken from the first ontological statement, is that stillness and
+> motion are judged above the base, not by it. Worse, "how much time is left"
+> is information, and a timer is state: storing it would break the second
+> statement, that the base stores no information.
+
+Timed motion therefore has two correct homes, neither of which touches the base:
+
+| Home | How | Cost |
+|---|---|---|
+| **Upper brain** | re-issue the command every 10 ms and send a zero-velocity command at the deadline | about 20 lines, base untouched |
+| **The object itself** | objects hold state, so an object may interpret a duration field and stop itself | one extra scalar in the event |
+
+**Current status**: neither exists. The base carries no timer and no
+remaining-time field (`make check-purity` checks this). This document will not
+dress the window semantics up as timed motion.
+
 ### 3.1.2 The shape of a motion event
 
 ```c
@@ -400,6 +429,8 @@ Just as IP is the narrow waist of the network: everything passes over it, yet ap
 37. **DONOS-MO-1: a device-agnostic motion-object interface standard** (`drivers/include/mo_standard.h`): any motion object that conforms to it can be recognised and driven, and the system **never asks what it is**. Three parts: **numeric rules** (Q32.32 only, SI units, monotonic nanosecond time, direction is a sign), **required interface** (`set_velocity`, and a `sample` that overwrites every field), and **eight behavioural clauses** (S-1 declare first, S-2 refuse rather than clamp, S-3 measured is independent, S-4 failure is honest, S-5 no unit leak, S-6 no type, S-7 first sighting only schedules, S-8 hot-plug safe). **The standard carries no device-type field, and that is deliberate**: a `type = wheel / joint` field would force the base to understand those names and turn every new device into an upstream change. Conformance is machine-checked by `tests/host/conformance_mo.c`: one **device-agnostic** suite runs two unrelated implementations (a linear dof=1 device and an angular dof=6 one) and both must pass; any "wheel-only" assumption hidden in the standard would fail one of them. The suite prints what it cannot reach: D-3 (no blocking) is a review and target-side timeout obligation a host test cannot measure — it is not dressed up as tested
 38. **The control law is hot-swappable and hands nothing over** (`brain/handover.c`): a controller is the **source** of events, not the holder of state. Swapping the control law swaps the source — speed loop for position loop, same object, same wire, same base, with not one line of the base changed. **The interface deliberately has no export or import of controller state**: once migration is allowed, someone will migrate the object's pose too, and the brain starts keeping information on the base's behalf, which is exactly what statelessness exists to prevent. Three rules: **(a)** the swap itself does not touch the object — the test asserts the measured position is bit-identical at the moment of the swap; **(b)** the new controller's first cycle only records the time and commands nothing, because it has not seen a measurement yet and any error at that point would be fabricated; **(c)** a refused install keeps the previous controller (`control_install` initialises into a fresh local and only overwrites on success), because doing nothing is better than leaving a wire uncontrolled after one failure. Evidence: `tests/host/test_handover.c` (16 assertions, including "the previous controller survives a refused install" and "after uninstalling it stops commanding")
 39. **Multi-joint coordination: a leg is several wires, not one over-wide command** (`brain/kinematics.c`, `brain/gait.c`): hip and knee are independent wires whose frames chain (the knee relative to the hip), each with its own position loop. **The gait produces target angles only** — it does not command, does not read sensors and does not touch the base, so the source of phase can be replaced wholesale while the control loops and the base stay unchanged. **The foot position is computed by the brain from measured angles**, not commanded ones: a commanded angle says where you hope the foot is, not where it is. One **geometrically necessary invariant** is checked: the distance from foot to hip must lie in `[|l1-l2|, l1+l2]`; leaving that ring means the angles themselves were computed wrongly, not that the workspace was badly chosen. The test runs three seconds and 300 samples against that invariant, and additionally requires the foot to really travel in both x and y and the two joints to move with their phase offset rather than in lockstep. **A real defect fell out of this**: the control loops wrote `FRAME_WORLD` unconditionally, so a chained joint could not be commanded relative to its parent; the frame now lives in the loop, `control_set_frame` / `control_install_framed` set it, and an invalid frame fails the whole install instead of leaving a half-installed controller
+40. **Quadruped gait: a stance foot must be stationary in world coordinates, and that identity fixes the parameters** (`brain/quadruped.c`): one leg is two wires (hip, knee) and four legs are eight wires; the base never sees a "leg", only eight lines. **The identity**: a stance foot is world-stationary exactly when the body's advance cancels the foot's retreat in body coordinates, so `stride = v · duty · T_cycle` and the phase rate is `ω = v · duty / stride`. An earlier version used `ω = v / stride`, making the foot retreat faster than the body moves and therefore **guaranteed to slip**: at v=0.2, duty=0.6, stride=0.08 the commanded target slid 32 mm — eight wires moving while the body gains nothing, which is precisely "looks like walking, actually skating". After the fix the **commanded target's world slip is exactly zero**. Two real defects surfaced on the way: `frac_q` asked the fixed-point divide for the integer part (`Q(v/1.0) = v`), so the phase never advanced and all four legs stayed in stance forever; and the test's lift assertion was polluted by the start-up pose (the leg begins at angle zero, so the foot already sits 0.38 m above the ground), meaning it measured the initial pose rather than the swing. Evidence: `tests/host/test_quad.c` (zero commanded slip, commanded lift exactly 30 mm, measured foot leaves the ground, diagonal legs in opposite phase, all eight wires driven)
+41. **The brain is an optional layer: `BRAIN=minimal|robot`** (`Makefile`): the release image used to link the whole reference brain unconditionally, so `donos.bin` contained `leg_ik`, `gait_step`, `quad_step` — while neither architecture's `kmain` ever called them. A user who wanted only the base was getting a quadruped gait in their firmware. This is the same class of error as evidence shipping with the firmware: **unselected code reaching the product**. `BRAIN=minimal` (default) now contains only `brain.c`, which the live demo actually uses; `BRAIN=robot` adds the control law, kinematics, trajectory, gait and quadruped modules. The `make check-brain-variants` gate asserts, on **both architectures**, that the minimal image carries no robot-layer symbol and the robot image carries all of them. Both architectures matter: the BRAIN block was once misplaced inside `ifeq ($(ARCH),x86_64)`, leaving the variable empty on riscv64 and breaking the link; testing half the matrix would have missed it
 
 ---
 

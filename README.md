@@ -129,6 +129,18 @@ make check               # 跑完 13 部分自检 + 长期运行 + 中断风暴
 release image with no self-test or benchmark code; the evidence build needs an
 explicit switch.*
 
+## 一句必须说清的话 / One thing that must be said plainly
+
+`duration_ns` 是**命令的新鲜度窗口**（这条命令还算不算数），**不是**「让它动多久」。
+「运行 N 秒后停止」**没有实现**，也不该由基座实现：基座若按时停止，就是在判断静止；
+计时器就是状态，而基座不保存信息。它属于大脑（到点改发零速度）或物件自己。
+详见[设计文档 §3.1.1](docs/design.md)。
+
+*`duration_ns` is a **command freshness window** (is this command still valid),
+**not** "move for that long". Timed motion is **not implemented** and does not
+belong in the base: a base that stops on schedule is judging stillness, and a
+timer is state. It belongs to the brain or to the object.*
+
 ## 设备接口标准 / Device interface standard
 
 **不管插上来的是轮子、关节还是别的东西，只要符合 DONOS-MO-1 就能被识别与操控；

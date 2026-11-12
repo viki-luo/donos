@@ -85,6 +85,26 @@ endif
 # 理由：自检是证明手段，不是产品的一部分。把它无条件链进发布镜像，
 # 会让每个部署都背着几十 KB 的测试代码 —— 而微内核的价值恰恰是「小」。
 # ---------------------------------------------------------------------
+# 大脑分两层：
+#   minimal  只含 live 演示真正用到的那一个大脑（brain.c）
+#   robot    再加上控制律、运动学、轨迹、步态、四足
+#
+# 为什么要有这个开关：发布镜像曾经无条件链入整套参考大脑 ——
+# 一个只想要基座的用户，烧进去的固件里带着四足步态。
+# 与「证据不随固件出货」是同一类错误：未经选择的代码进了产品。
+BRAIN ?= minimal
+BRAIN_MINIMAL := brain/brain.c
+BRAIN_ROBOT   := brain/control.c brain/handover.c brain/kinematics.c \
+                 brain/trajectory.c brain/gait.c brain/quadruped.c
+
+ifeq ($(BRAIN),robot)
+BRAIN_SRCS := $(BRAIN_MINIMAL) $(BRAIN_ROBOT)
+else ifeq ($(BRAIN),minimal)
+BRAIN_SRCS := $(BRAIN_MINIMAL)
+else
+$(error 不支持的 BRAIN=$(BRAIN)，可选 minimal / robot)
+endif
+
 # 每个架构的「仅自检」文件不同：riscv64 的 mmu.c 是真正的建表代码
 # （无条件需要），而 x86_64 的 mmu.c 只是探测辅助。
 ifeq ($(ARCH),x86_64)
@@ -100,7 +120,7 @@ endif
 
 C_SRCS := $(filter-out $(SELFTEST_ONLY_C), \
             $(wildcard base/*.c) \
-            $(wildcard brain/*.c) \
+            $(BRAIN_SRCS) \
             $(wildcard monitor/*.c) \
             $(wildcard drivers/*.c) \
             $(wildcard arch/$(ARCH)/*.c))
@@ -252,7 +272,8 @@ clean:
 # 符号门禁：镜像必须存在、非空，且不含任何未定义符号。
 # 裸机没有运行时库可链接，所以任何 ' U ' 符号都是运行时跳向地址零。
 .PHONY: check-symbols check-docs check-release check-all check-purity \
-        check-single-core check-size check-slim bench-latency fuzz \
+        check-single-core check-spdx check-size check-slim \
+        check-brain-variants bench-latency fuzz \
         host-test sanitize
 check-symbols:
 	@set -e; \
@@ -356,6 +377,23 @@ FOOT_TEST := build/host/test_foot.exe
 # 连续足端轨迹：目标在动，误差界由 v/K 推出。
 TRACK_TEST := build/host/test_track.exe
 
+# 形态无关控制探针：同一份代码驱动两种互不相干的形态。
+# 它证明的是基座 + 标准的下界，不是大脑的写法示范（见文件头注释）。
+FORMBLIND_PROBE := build/host/probe_formblind.exe
+
+# 四足步态：八条接线、支撑相不滑行、对角小跑。
+QUAD_TEST := build/host/test_quad.exe
+
+$(QUAD_TEST): tests/host/test_quad.c brain/quadruped.c brain/kinematics.c \
+              brain/control.c brain/handover.c brain/include/quadruped.h
+	@mkdir -p build/host
+	$(HOST_CC) $(HOST_CFLAGS) -Ibrain/include tests/host/test_quad.c -o $@
+
+$(FORMBLIND_PROBE): tests/host/probe_formblind.c base/base.c base/fixed.c \
+                    base/quat.c base/object.c
+	@mkdir -p build/host
+	$(HOST_CC) $(HOST_CFLAGS) tests/host/probe_formblind.c -o $@
+
 $(TRACK_TEST): tests/host/test_track.c brain/trajectory.c brain/kinematics.c \
                brain/control.c brain/handover.c brain/include/trajectory.h
 	@mkdir -p build/host
@@ -435,7 +473,7 @@ fuzz: $(FUZZ_TEST)
 		echo "  确定性模糊出现失败"; exit 1; \
 	fi
 
-host-test: $(HOST_TEST) $(WIRE_TEST) $(MONITOR_TEST) $(QUAT_TEST) $(DEVICE_TEST) $(WHEEL_TEST) $(JOINT_TEST) $(MO_CONF) $(SINCOS_TEST) $(CONTROL_TEST) $(HANDOVER_TEST) $(GAIT_TEST) $(FOOT_TEST) $(TRACK_TEST)
+host-test: $(HOST_TEST) $(WIRE_TEST) $(MONITOR_TEST) $(QUAT_TEST) $(DEVICE_TEST) $(WHEEL_TEST) $(JOINT_TEST) $(MO_CONF) $(SINCOS_TEST) $(CONTROL_TEST) $(HANDOVER_TEST) $(GAIT_TEST) $(FOOT_TEST) $(TRACK_TEST) $(FORMBLIND_PROBE) $(QUAD_TEST)
 	@$(HOST_TEST)
 	@$(WIRE_TEST)
 	@$(MONITOR_TEST)
@@ -450,6 +488,8 @@ host-test: $(HOST_TEST) $(WIRE_TEST) $(MONITOR_TEST) $(QUAT_TEST) $(DEVICE_TEST)
 	@$(GAIT_TEST)
 	@$(FOOT_TEST)
 	@$(TRACK_TEST)
+	@$(FORMBLIND_PROBE)
+	@$(QUAD_TEST)
 
 # MinGW 的 UBSan 运行库并非所有发行包都完整，因此使用 trap-on-error：
 # 编译器在任何 UB 点直接发出陷阱指令，不需要链接 sanitizer runtime。
@@ -527,6 +567,16 @@ sanitize:
 	@build/host/test_track_ubsan.exe
 	$(HOST_CC) $(HOST_CFLAGS) -fsanitize=undefined \
 		-fsanitize-undefined-trap-on-error \
+		tests/host/probe_formblind.c \
+		-o build/host/probe_formblind_ubsan.exe
+	@build/host/probe_formblind_ubsan.exe
+	$(HOST_CC) $(HOST_CFLAGS) -Ibrain/include -fsanitize=undefined \
+		-fsanitize-undefined-trap-on-error \
+		tests/host/test_quad.c \
+		-o build/host/test_quad_ubsan.exe
+	@build/host/test_quad_ubsan.exe
+	$(HOST_CC) $(HOST_CFLAGS) -fsanitize=undefined \
+		-fsanitize-undefined-trap-on-error \
 		tests/host/fuzz_base.c base/quat.c \
 		-o build/host/fuzz_base_ubsan.exe
 	@build/host/fuzz_base_ubsan.exe 50000
@@ -545,6 +595,38 @@ check-size:
 #   (a) 发布镜像里不存在任何自检/基准/故障探针符号；
 #   (b) 发布镜像体积落在更紧的预算内；
 #   (c) 发布镜像能启动、跑完 live 演示并报告「物件仍在运动」。
+# 大脑变体门禁：默认镜像不得携带机器人应用层的符号。
+#
+# 这条断言的是「未经选择的代码没有进产品」，与 check-slim 断言的
+# 「证据代码没有进产品」是同一类纪律的两个面。
+# 大脑变体门禁：默认镜像不得携带机器人应用层的符号。
+#
+# 这条断言的是「未经选择的代码没有进产品」，与 check-slim 断言的
+# 「证据代码没有进产品」是同一类纪律的两个面。
+#
+# 两个架构都要查：早先只查 x86_64 时，BRAIN 块一度被错放进
+# `ifeq ($(ARCH),x86_64)` 分支内，riscv64 上 BRAIN_SRCS 为空、
+# 链接失败 —— 只测一半架构就会漏掉这种错。
+check-brain-variants:
+	@set -e; \
+	for arch in x86_64 riscv64; do \
+		$(MAKE) ARCH=$$arch SELFTEST=0 BRAIN=minimal \
+			BUILD=build/$$arch-min >/dev/null; \
+		$(MAKE) ARCH=$$arch SELFTEST=0 BRAIN=robot \
+			BUILD=build/$$arch-robot >/dev/null; \
+		for sym in leg_ik gait_step path_step_circle quad_step control_install; do \
+			if $(NM) build/$$arch-min/donos.bin 2>/dev/null | grep -q " $$sym$$"; then \
+				echo "$$arch BRAIN=minimal 的镜像里出现了机器人层符号 $$sym"; \
+				exit 1; \
+			fi; \
+			if ! $(NM) build/$$arch-robot/donos.bin 2>/dev/null | grep -q " $$sym$$"; then \
+				echo "$$arch BRAIN=robot 的镜像里缺少 $$sym（说明开关没生效）"; \
+				exit 1; \
+			fi; \
+		done; \
+	done; \
+	echo "  ok   两架构：BRAIN=minimal 不含机器人层符号，BRAIN=robot 含"
+
 check-slim:
 	@set -e; \
 	$(MAKE) ARCH=x86_64 SELFTEST=0 >/dev/null; \
@@ -624,6 +706,6 @@ check-single-core:
 check-release: check-symbols check-docs check-purity check-single-core check-spdx
 	@echo "=== 发布前门禁通过 / release gate passed ==="
 
-check-all: check bench-latency check-size check-slim host-test fuzz \
-           sanitize check-release
+check-all: check bench-latency check-size check-slim check-brain-variants \
+           host-test fuzz sanitize check-release
 	@echo "=== 全部门禁通过 / all gates passed ==="

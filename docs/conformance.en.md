@@ -29,11 +29,29 @@ It is not necessarily a bad object; accepting it would require a second primitiv
 | **R7** | At most 6 degrees of freedom | A single wire carries at most 6 dimensions | `dof > 6` is rejected | **tested** |
 | **R8** | Self-describing | Can declare its capability and hold its pose and velocity, via the direct brain channel, never through the base | Readable after declaring; `base.h` has no corresponding interface | **tested** |
 
+| **R10** | Timed motion is not the base's job | "Run for N seconds then stop" is not the base's responsibility: it holds no timer and judges no stillness | No time-accumulation or remaining-time field exists in `base/base.c`; `make check-purity` checks it | Structural |
 | **R9** | Device interface conformance | When a real device is attached it must satisfy DONOS-MO-1: commands go to `set_velocity`, the measurement is overwritten by `sample`, and the measurement must not be a copy of the command | `tests/host/conformance_mo.c` runs one device-agnostic suite over two implementations (linear dof=1, angular dof=6) | **Tested** |
 
 R7 is not a limitation: a seven-axis arm does not "fail to conform" — it is "more than one object". It consists of several wires of at most 6 dimensions each, serving as each other's frames.
 
 R8 is a precondition of R5: resolving `frame` requires knowing where both the object and its frame are.
+### R10: why timed motion is not in the base
+
+The original requirement said the base should let an object move, and for how
+long. Read literally that means "run for N seconds then stop", and that is
+**not implemented**, because:
+
+- a base that stops an object after N seconds is **judging stillness**, which
+  conflicts with stillness and motion being judged above the base;
+- "how much time is left" is information and a timer is state, which conflicts
+  with the base storing no information.
+
+It has two correct homes: the **brain** re-issuing the command every 10 ms and
+sending zero velocity at the deadline, or the **object** interpreting a duration
+field and stopping itself (objects are allowed to hold state). Neither exists
+today. `duration_ns` is a **freshness window**: it answers "is this command still
+valid", not "make it move for that long".
+
 ### How R9 relates to R1-R8
 
 R1-R8 constrain **what an object looks like to the base**: one wire, at most six
